@@ -436,78 +436,174 @@ class App {
 
   /* -------------------------------------------------------------- buffer view (plan/11 section 4) */
 
+  /* The buffer, three ways (wave_strip picks which the engine can give):
+   *   Slices (Scan): the tape as 16 waves stacked in depth, a wavetable picture; Position and Spray
+   *     light the slices grains read, live grains run along the tape's edge.
+   *   Outline (Sample): the file's min/max shape, the region bright and the rest dim.
+   *   Bars (Live, or chosen): a bar per slice of the buffer, level as height, brightness as colour.
+   * Brightness colours every view, from --dark-tone to --bright-tone. */
   bufferView() {
-    const c = h("canvas", { width: "1024", height: "200", class: "bufview" });
+    const c = h("canvas", { width: "1024", height: "220", class: "bufview" });
     const ctx = c.getContext("2d");
-    const z = h("canvas", { width: "320", height: "200", class: "zoomview" });
+    const z = h("canvas", { width: "320", height: "220", class: "zoomview" });
     const zctx = z.getContext("2d");
-    const status = h("div", { class: "bufstatus" }, "");
+    const status = h("span", { class: "bufstatus" }, "");
+    let view = "slices";
+    try { view = localStorage.getItem("drizzle.view") || view; } catch { /* no storage */ }
+    const viewBtns = ["slices", "bars"].map((v) => h("button", { type: "button", class: "seg-b", "data-view": v }, v === "slices" ? "Slices" : "Bars"));
+    const showView = () => viewBtns.forEach((b) => b.classList.toggle("on", b.dataset.view === view));
+    viewBtns.forEach((b) => b.addEventListener("click", () => {
+      view = b.dataset.view;
+      showView();
+      try { localStorage.setItem("drizzle.view", view); } catch { /* no storage */ }
+      draw();
+    }));
+    showView();
     const hexAt = (s, i) => parseInt(s.substr(i, 2), 16);
     /* "#rrggbb" -> [r, g, b] (the theme's tones), and a mix of two */
     const rgb = (v, d) => { const m = /#([0-9a-f]{6})/i.exec(v || ""); const n = parseInt(m ? m[1] : d, 16); return [n >> 16, (n >> 8) & 255, n & 255]; };
-    const mix = (a, b, t) => `rgb(${a.map((x, i) => Math.round(x + (b[i] - x) * t)).join(",")})`;
+    const mix = (a, b, t, al = 1) => `rgba(${a.map((x, i) => Math.round(x + (b[i] - x) * t)).join(",")},${al})`;
+
     const draw = () => {
-      const bv = this.extra.buf_view || "", gv = this.extra.grain_view || "", wv = this.extra.wave_view || "";
+      const bv = this.extra.buf_view || "", gv = this.extra.grain_view || "", wv = this.extra.wave_view || "", ws = this.extra.wave_strip || "";
       const W = c.width, H = c.height;
       const css = getComputedStyle(document.body);
-      const panel = css.getPropertyValue("--panel").trim() || "#111", accent = css.getPropertyValue("--accent").trim() || "#fc6";
-      const dark = rgb(css.getPropertyValue("--dark-tone"), "3b4cc0"), bright = rgb(css.getPropertyValue("--bright-tone"), "f6c445");
+      const tok = (k, d) => css.getPropertyValue(k).trim() || d;
+      const panel = tok("--panel", "#111"), accent = tok("--accent", "#fc6"), line = tok("--line", "#333");
+      const dark = rgb(tok("--dark-tone"), "3b4cc0"), bright = rgb(tok("--bright-tone"), "f6c445");
       ctx.fillStyle = panel;
       ctx.fillRect(0, 0, W, H);
-      let still = true;
+      const pos = this.values.get("gr_pos"), spr = this.values.get("gr_spray");
+      let caption = this.link ? "" : "Press Start audio to play Drizzle in this browser.";
       if (bv.length >= 6) {
-        const mode = bv[0], frozen = bv[1] === "1";
-        still = mode !== "L" || frozen;
-        const prog = hexAt(bv, 2);
-        const n = Math.min(128, (bv.length - 6) / 2), bw = W / n;
-        /* level as height, brightness as colour, stretched over this buffer's own range (a timbre
-         * sweep shows even where the level is flat) */
+        const mode = bv[0], frozen = bv[1] === "1", prog = hexAt(bv, 2);
+        const still = mode !== "L" || frozen;
+        const n = Math.min(128, (bv.length - 6) / 2);
+        /* brightness, stretched over this buffer's own range (a static buffer does not show noise) */
         const hasB = bv.length >= 6 + 512;
         let lo = 255, hi = 0;
         if (hasB) for (let i = 0; i < n; i++) { const b = hexAt(bv, 6 + 256 + 2 * i); lo = Math.min(lo, b); hi = Math.max(hi, b); }
         if (hi - lo < 64) { const m = (hi + lo) / 2; lo = m - 32; hi = m + 32; }
-        for (let i = 0; i < n; i++) {
-          const a = hexAt(bv, 6 + 2 * i) / 255;
-          const hh = Math.max(1, a * (H * 0.45));
-          const t = hasB ? Math.min(1, Math.max(0, (hexAt(bv, 6 + 256 + 2 * i) - lo) / (hi - lo))) : 0.5;
-          ctx.fillStyle = mix(dark, bright, t);
-          ctx.fillRect(i * bw, H / 2 - hh, bw - 1, 2 * hh);
+        const tone = (u) => { /* brightness at u along the buffer, 0..1 */
+          if (!hasB) return 0.5;
+          const i = Math.min(n - 1, Math.max(0, Math.floor(u * n)));
+          return Math.min(1, Math.max(0, (hexAt(bv, 6 + 256 + 2 * i) - lo) / (hi - lo)));
+        };
+        /* Sample: Position runs over the region, which the views draw inside the whole file */
+        const r0 = mode === "M" ? this.values.get("smp_start") : 0, r1 = mode === "M" ? this.values.get("smp_end") : 1;
+        const at = (p) => r0 + p * (r1 - r0);
+        const S = 16, P = (ws.length - 1) / 2 / 16;
+        if (view === "slices" && ws[0] === "S" && P >= 8 && Number.isInteger(P)) {
+          /* the tape as a wavetable: slice 0 in front, the end of the tape at the back */
+          const dx = W * 0.016, dy = H * 0.028, m = 14, w = W - 2 * m - (S - 1) * dx, amp = H * 0.14;
+          const base = (j) => H - 32 - amp - j * dy;
+          const lit = (j) => Math.abs((j + 0.5) / S - pos) <= Math.max(spr, 0.5 / S);
+          for (let j = S - 1; j >= 0; j--) {
+            const x0 = m + j * dx, y0 = base(j);
+            ctx.beginPath();
+            for (let i = 0; i < P; i++) {
+              const v = (hexAt(ws, 1 + 2 * (j * P + i)) - 128) / 127;
+              const px = x0 + (i / (P - 1)) * w, py = y0 - v * amp;
+              if (i) ctx.lineTo(px, py); else ctx.moveTo(px, py);
+            }
+            const t = tone((j + 0.5) / S), on = lit(j);
+            /* occlude the slices behind, so the stack reads as depth */
+            ctx.lineTo(x0 + w, y0 + amp + 6);
+            ctx.lineTo(x0, y0 + amp + 6);
+            ctx.closePath();
+            ctx.globalAlpha = 0.8;
+            ctx.fillStyle = panel;
+            ctx.fill();
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = mix(dark, bright, t, on ? 0.18 : 0.05);
+            ctx.fill();
+            ctx.beginPath();
+            for (let i = 0; i < P; i++) {
+              const v = (hexAt(ws, 1 + 2 * (j * P + i)) - 128) / 127;
+              const px = x0 + (i / (P - 1)) * w, py = y0 - v * amp;
+              if (i) ctx.lineTo(px, py); else ctx.moveTo(px, py);
+            }
+            ctx.strokeStyle = mix(dark, bright, t, on ? 1 : 0.45);
+            ctx.lineWidth = on ? 2.5 : 1.5;
+            ctx.lineJoin = "round";
+            ctx.stroke();
+          }
+          /* the tape's edge: Position ± Spray, and the live grains on it */
+          const ex = (u) => m - 6 + (u * S - 0.5) * dx, ey = (u) => base(u * S - 0.5) + amp + 10;
+          ctx.strokeStyle = line;
+          ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.moveTo(ex(0), ey(0)); ctx.lineTo(ex(1), ey(1)); ctx.stroke();
+          ctx.strokeStyle = accent;
+          ctx.lineWidth = 5;
+          ctx.lineCap = "round";
+          const a0 = Math.max(0, pos - spr), a1 = Math.min(1, pos + spr);
+          ctx.beginPath(); ctx.moveTo(ex(a0), ey(a0)); ctx.lineTo(ex(a1) + 0.01, ey(a1)); ctx.stroke();
+          ctx.lineCap = "butt";
+          ctx.fillStyle = tok("--grain", "#fff");
+          for (let i = 0; i + 4 <= gv.length; i += 4) {
+            const g = hexAt(gv, i) / 255, ga = hexAt(gv, i + 2) / 255;
+            ctx.beginPath();
+            ctx.arc(ex(g), ey(g) + 8, 2 + 3 * ga, 0, 2 * Math.PI);
+            ctx.fill();
+          }
+          caption = "Scan · " + reading(this.byKey.get("buf_len"), this.values.get("buf_len"), this.meta) + " tape in 16 slices, start in front";
+        } else {
+          const outline = view === "slices" && ws[0] === "M" && ws.length >= 1 + 4 * 256;
+          if (outline) {
+            /* the file's shape, column by column; outside the region dimmed */
+            const N = 256, cw = W / N, mid = H / 2 - 6;
+            for (let i = 0; i < N; i++) {
+              const mn = (hexAt(ws, 1 + 4 * i) - 128) / 127, mx = (hexAt(ws, 3 + 4 * i) - 128) / 127, u = (i + 0.5) / N;
+              ctx.fillStyle = mix(dark, bright, tone(u), u >= r0 && u <= r1 ? 1 : 0.25);
+              ctx.fillRect(i * cw, mid - mx * mid * 0.92, Math.max(1, cw - 0.5), Math.max(1.5, (mx - mn) * mid * 0.92));
+            }
+          } else {
+            /* level as height, brightness as colour */
+            const bw = W / n;
+            for (let i = 0; i < n; i++) {
+              const a = hexAt(bv, 6 + 2 * i) / 255, hh = Math.max(1, a * (H * 0.42));
+              ctx.fillStyle = mix(dark, bright, tone((i + 0.5) / n));
+              ctx.fillRect(i * bw, H / 2 - 6 - hh, bw - 1, 2 * hh);
+            }
+          }
+          /* Position ± Spray (Live reads back from the head at the right) */
+          const x = mode === "M" ? at(pos) : still ? pos : 1 - pos, sw = mode === "M" ? spr * (r1 - r0) : spr;
+          ctx.strokeStyle = accent;
+          ctx.lineWidth = 2;
+          ctx.strokeRect((x - sw) * W, 2, Math.max(2, 2 * sw * W), H - 18);
+          ctx.fillStyle = tok("--grain", "#fff");
+          for (let i = 0; i + 4 <= gv.length; i += 4) {
+            const gx = hexAt(gv, i) / 255, ga = hexAt(gv, i + 2) / 255;
+            ctx.beginPath();
+            ctx.arc(gx * W, H - 26 - ga * (H - 44), 3 + 4 * ga, 0, 2 * Math.PI);
+            ctx.fill();
+          }
+          caption = `${mode === "M" ? "Sample" : mode === "S" ? "Scan" : "Live"}${frozen ? " · frozen" : ""}` +
+            (mode === "M" ? (outline ? " · the file, region bright" : "") : " · " + reading(this.byKey.get("buf_len"), this.values.get("buf_len"), this.meta)) +
+            (view === "slices" && mode === "L" ? " · Live moves too fast for slices: bars" : "");
         }
         if (prog < 255) {
           ctx.fillStyle = accent;
           ctx.fillRect(0, H - 4, W * prog / 255, 4);
+          caption += " · rendering tape";
         }
-        const pos = this.values.get("gr_pos"), spr = this.values.get("gr_spray");
-        const x = still ? pos : 1 - pos;
-        ctx.strokeStyle = accent;
-        ctx.lineWidth = 2;
-        ctx.strokeRect((x - spr) * W, 2, Math.max(2, 2 * spr * W), H - 4);
-        status.textContent = `${mode === "M" ? "Sample" : mode === "S" ? "Scan" : "Live"}${frozen ? " · frozen" : ""}` +
-          `${prog < 255 ? " · rendering tape" : ""}` + (mode === "M" ? "" : " · " + reading(this.byKey.get("buf_len"), this.values.get("buf_len"), this.meta)) +
-          (hasB ? " · colour: dark to bright timbre" : "");
-      } else {
-        status.textContent = this.link ? "" : "Press Start audio to play Drizzle in this browser.";
+        caption += " · colour: dark to bright timbre";
       }
-      ctx.fillStyle = css.getPropertyValue("--grain") || "#fff";
-      for (let i = 0; i + 4 <= gv.length; i += 4) {
-        const gx = hexAt(gv, i) / 255, ga = hexAt(gv, i + 2) / 255;
-        ctx.beginPath();
-        ctx.arc(gx * W, H - 12 - ga * (H - 24), 3 + 4 * ga, 0, 2 * Math.PI);
-        ctx.fill();
-      }
+      status.textContent = caption;
       /* the zoom: about two periods of the material at Position (wave_view) */
       const ZW = z.width, ZH = z.height;
       zctx.fillStyle = panel;
       zctx.fillRect(0, 0, ZW, ZH);
-      zctx.strokeStyle = css.getPropertyValue("--line").trim() || "#333";
+      zctx.strokeStyle = line;
       zctx.lineWidth = 1;
       zctx.beginPath();
       zctx.moveTo(0, (ZH - 30) / 2);
       zctx.lineTo(ZW, (ZH - 30) / 2);
       zctx.stroke();
       if (wv.length >= 128) {
-        zctx.strokeStyle = css.getPropertyValue("--wave").trim() || "#6af";
+        zctx.strokeStyle = tok("--wave", "#6af");
         zctx.lineWidth = 3;
+        zctx.lineJoin = "round";
         zctx.beginPath();
         for (let i = 0; i < 64; i++) {
           const v = (hexAt(wv, 2 * i) - 128) / 127;
@@ -516,23 +612,26 @@ class App {
         }
         zctx.stroke();
       }
-      zctx.fillStyle = css.getPropertyValue("--muted").trim() || "#999";
-      zctx.font = "22px system-ui, sans-serif";
+      zctx.fillStyle = tok("--muted", "#999");
+      zctx.font = "20px system-ui, sans-serif";
       zctx.fillText("the wave at Position", 10, ZH - 9);
     };
-    /* the engine here is asked 25 times a second; the Move pushes these values itself */
+    /* the engine here is asked 25 times a second (the slices, which change only with the tape, 2.5
+     * times); the Move pushes these values itself */
+    let tick = 0;
     const loop = async () => {
       if (this.link?.kind === "local") {
-        const [bv, gv, wv] = await Promise.all([this.link.get("buf_view"), this.link.get("grain_view"), this.link.get("wave_view")]);
-        this.extra.buf_view = bv || "";
-        this.extra.grain_view = gv || "";
-        this.extra.wave_view = wv || "";
+        const ask = ["buf_view", "grain_view", "wave_view"];
+        if (tick++ % 10 === 0) ask.push("wave_strip");
+        const got = await Promise.all(ask.map((k) => this.link.get(k)));
+        ask.forEach((k, i) => { this.extra[k] = got[i] || ""; });
       }
       draw();
       setTimeout(() => requestAnimationFrame(loop), 40);
     };
     loop();
-    return h("div", { class: "bufbox" }, h("div", { class: "bufrow" }, c, z), status);
+    return h("div", { class: "bufbox" }, h("div", { class: "bufrow" }, c, z),
+      h("div", { class: "bufcap" }, status, h("div", { class: "seg view-seg", role: "group", "aria-label": "Buffer view" }, ...viewBtns)));
   }
 
   /* -------------------------------------------------------------- playing (standalone only) */

@@ -631,6 +631,24 @@ static void test_scan(void) {
         hi = x > hi ? x : hi;
     }
     CHECK(n == 128 && hi - lo > 100, "wave_view shows the wave at Position (%d, range %d)", n, hi - lo);
+    /* wave_strip: the tape as 16 slices, each a full wave */
+    {
+        static char ws[4096];
+        n = api->get_param(h, "wave_strip", ws, sizeof ws);
+        int full = 0;
+        for (int j = 0; j < DRZ_STRIP && n == 1 + 2 * DRZ_STRIP * DRZ_STRIP_PTS; j++) {
+            int slo = 255, shi = 0;
+            for (int i = 0; i < DRZ_STRIP_PTS; i++) {
+                const char *q = ws + 1 + 2 * (j * DRZ_STRIP_PTS + i);
+                int x = (int)strtol((char[3]){q[0], q[1], 0}, NULL, 16);
+                slo = x < slo ? x : slo;
+                shi = x > shi ? x : shi;
+            }
+            full += shi - slo > 60;
+        }
+        CHECK(ws[0] == 'S' && full == DRZ_STRIP, "wave_strip: %d of %d slices hold a wave (%d chars)", full, DRZ_STRIP, n);
+        CHECK(api->get_param(h, "wave_strip", ws, 100) < 0, "wave_strip refuses a short buffer");
+    }
     n = api->get_param(h, "grain_view", v, sizeof v);
     CHECK(n > 0 && n % 4 == 0, "grain_view (%d)", n);
     /* brightness: a tape whose Tone sweeps from dark to open reads darker at the start than at the end */
@@ -1228,6 +1246,16 @@ static void test_samples(void) {
     char vbuf[600];
     api->get_param(h, "buf_view", vbuf, sizeof vbuf);
     CHECK(vbuf[0] == 'M' && strstr(vbuf + 6, "00000000") == NULL, "buf_view draws the sample: %.12s", vbuf);
+    {
+        static char ws[4096];
+        int n = api->get_param(h, "wave_strip", ws, sizeof ws), wide = 0;
+        for (int c = 0; c < DRZ_ENV && n == 1 + 4 * DRZ_ENV; c++) {
+            const char *q = ws + 1 + 4 * c;
+            int mn = (int)strtol((char[3]){q[0], q[1], 0}, NULL, 16), mx = (int)strtol((char[3]){q[2], q[3], 0}, NULL, 16);
+            wide += mn < 0x60 && mx > 0xA0;
+        }
+        CHECK(ws[0] == 'M' && wide > DRZ_ENV - 4, "wave_strip outlines the sample (%d of %d columns, %d chars)", wide, DRZ_ENV, n);
+    }
     /* the path is saved, not the audio, and a reload loads it again */
     static char blob[16384];
     api->get_param(h, "state", blob, sizeof blob);

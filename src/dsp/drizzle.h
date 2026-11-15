@@ -29,6 +29,9 @@
 #define DRZ_TAPE_DEBOUNCE 2646   /* 60 ms */
 #define DRZ_BINS 128             /* display bins (plan/05 section 5) */
 #define DRZ_VIEW (2 * DRZ_BINS)  /* a display: 128 peak levels, then 128 brightnesses */
+#define DRZ_ENV 256              /* the web UI's sample outline: 256 min/max pairs (wave_strip) */
+#define DRZ_STRIP 16             /* the web UI's tape slices (wave_strip) */
+#define DRZ_STRIP_PTS 48         /* points per slice */
 #define DRZ_DENS_UNISON 3        /* extra detuned copies of Analog osc A (an_dens) */
 #define DRZ_STEP_NEW INT64_MIN   /* voice_t.last_step: resolve against the grid at the next sub-block */
 
@@ -188,6 +191,7 @@ typedef struct drz_inst {
     int smp_ready;                          /* smp[] holds a sample the grains may read */
     int32_t smp_frames;
     uint8_t smp_bins[DRZ_VIEW];
+    int8_t smp_env[2 * DRZ_ENV]; /* min, max per column of the whole file (wave_strip) */
     int64_t step_cur;                       /* the grid step the sub-block starts in */
     float step_frac;                        /* how far into it, 0..1 */
     float vol_cur;

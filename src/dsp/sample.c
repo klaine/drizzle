@@ -167,8 +167,23 @@ void smp_normalise(int16_t *x, int32_t n) {
     for (int32_t i = 0; i < n; i++) x[i] = (int16_t)lrintf(clampf((float)x[i] * g, -32767.0f, 32767.0f));
 }
 
-/* The display: 128 peak levels, then 128 brightnesses (plan/05 section 5). */
-static void make_bins(const int16_t *x, int32_t n, uint8_t *bins) {
+/* The display: 128 peak levels, then 128 brightnesses (plan/05 section 5); and for the web UI the
+ * file's outline, the lowest and highest sample of each of 256 columns as signed bytes. */
+static void make_env(const int16_t *x, int32_t n, int8_t *env) {
+    for (int c = 0; c < DRZ_ENV; c++) {
+        int32_t a = (int32_t)((int64_t)n * c / DRZ_ENV), e = (int32_t)((int64_t)n * (c + 1) / DRZ_ENV);
+        int lo = 0, hi = 0;
+        for (int32_t i = a; i < e; i++) {
+            if (x[i] < lo) lo = x[i];
+            if (x[i] > hi) hi = x[i];
+        }
+        env[2 * c] = (int8_t)(lo / 258);
+        env[2 * c + 1] = (int8_t)(hi / 258);
+    }
+}
+
+static void make_bins(const int16_t *x, int32_t n, uint8_t *bins, int8_t *env) {
+    make_env(x, n, env);
     for (int b = 0; b < DRZ_BINS; b++) {
         int32_t a = (int32_t)((int64_t)n * b / DRZ_BINS), e = (int32_t)((int64_t)n * (b + 1) / DRZ_BINS);
         int pk = 0;
@@ -194,6 +209,7 @@ typedef struct {
     int norm;
     int32_t frames;          /* results, valid once ready == req */
     uint8_t bins[DRZ_VIEW];
+    int8_t env[2 * DRZ_ENV];
     char status[64];
     int16_t *dst;
 } smp_slot_t;
@@ -214,6 +230,7 @@ static uint8_t g_chunk[CHUNK];
 static void load(smp_slot_t *s, uint32_t r, const char *path, int norm) {
     s->frames = 0;
     memset(s->bins, 0, sizeof s->bins);
+    memset(s->env, 0, sizeof s->env);
     if (!path[0]) {
         set_status(s, "none", NULL);
         atomic_store_explicit(&s->ready, r, memory_order_release);
@@ -259,7 +276,7 @@ static void load(smp_slot_t *s, uint32_t r, const char *path, int norm) {
     if (atomic_load(&s->req) != r) return;
     int32_t frames = smp_resample(g_stage, got, w.rate, s->dst, DRZ_SMP_MAX);
     if (norm) smp_normalise(s->dst, frames);
-    make_bins(s->dst, frames, s->bins);
+    make_bins(s->dst, frames, s->bins, s->env);
     s->frames = frames;
     char t[32];
     snprintf(t, sizeof t, "%d%s", (int)frames, cut ? ":cut" : "");
@@ -358,6 +375,7 @@ void smp_block(drz_inst_t *I) {
     if (!I->smp_ready && atomic_load_explicit(&s->ready, memory_order_acquire) == r && s->frames > 0) {
         I->smp_frames = s->frames;
         memcpy(I->smp_bins, s->bins, sizeof I->smp_bins);
+        memcpy(I->smp_env, s->env, sizeof I->smp_env);
         I->smp_ready = 1;
     }
 }
@@ -381,7 +399,7 @@ void smp_set_direct(drz_inst_t *I, const float *x, int32_t frames, const char *n
     I->smp_ready = 0;
     for (int32_t i = 0; i < frames; i++) I->smp[i] = (int16_t)lrintf(clampf(x[i], -1.0f, 1.0f) * 32767.0f);
     if (I->v[P_SMP_NORM] >= 0.5f) smp_normalise(I->smp, frames);
-    make_bins(I->smp, frames, s->bins);
+    make_bins(I->smp, frames, s->bins, s->env);
     snprintf(s->path, sizeof s->path, "%s", name ? name : "");
     s->frames = frames;
     char t[32];

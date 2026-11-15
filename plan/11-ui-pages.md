@@ -76,7 +76,13 @@ on are the first thing under the hands.
   bright ones solid, the level's outline always drawn); the web UI as the bars' colour, from
   `--dark-tone` to `--bright-tone`. `wave_view` (web UI only: the home page has no room for a fifth
   extra key) is 64 signed-byte points of about two periods of the material at the newest voice's
-  Position, drawn as a zoom beside the buffer. `grain_view` is
+  Position, drawn as a zoom beside the buffer. `wave_strip` (web UI only too) gives the browser a
+  richer picture than the bars: in Scan, `S` and 16 slices of 48 signed-byte points, two periods of
+  the root at `(j + 0.5) / 16` along the tape, drawn as a wavetable stacked in depth (start in front,
+  the slices under Position ± Spray lit, live grains along the tape's edge); in Sample, `M` and 256
+  min/max pairs of the whole file (made once by the loader), drawn as the file's outline with the
+  region bright; in Live, `L` alone, and the page keeps the bars (the ring moves too fast). A
+  Slices/Bars switch under the view picks one. `grain_view` is
   four hex digits per live grain (up to 32): position along the readable range and the window's
   current level. **VERIFY** the poll rate and that ~300-byte answers are cheap enough at that rate; fall
   back to bins every 4th frame.
@@ -104,8 +110,8 @@ tone").
 single file `build/drizzle.html`:
 - **Header:** the shared preset browser (`presetbrowser.js`, `presetdrawer.js`, `presetbrowser.css`
   are byte-identical copies of Amino's canonical files) and Patch JSON.
-- **Stage:** the buffer view (level as height, brightness as colour, Position ± Spray, live grains)
-  and the `wave_view` zoom; standalone, the Start audio overlay sits on it.
+- **Stage:** the buffer view (slices, outline or bars, see section 4; brightness as colour,
+  Position ± Spray, live grains) and the `wave_view` zoom; standalone, the Start audio overlay sits on it.
 - **Perform strip:** the Main page's knobs, a large Freeze toggle, Macros 1–4 and Volume.
 - **Keyboard** (standalone only): 25 keys, octave −/+, Hold, an internal transport (Play, BPM) for
   Tempo grains and synced LFOs. Touch, pen or mouse through pointer events with capture: slide across

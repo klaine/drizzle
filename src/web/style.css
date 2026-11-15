@@ -67,7 +67,10 @@ select {
 .bufrow { display: grid; grid-template-columns: 1fr minmax(120px, 24%); gap: 10px; }
 .bufview, .zoomview { width: 100%; height: auto; display: block; border-radius: 8px; }
 .zoomview { border: 1px solid var(--line); }
-.bufstatus { color: var(--muted); font-size: 12px; margin: 8px 2px 0; font-variant-numeric: tabular-nums; }
+.bufcap { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.bufstatus { flex: 1; min-width: 0; color: var(--muted); font-size: 12px; margin-left: 2px; font-variant-numeric: tabular-nums; }
+.view-seg { flex: none; }
+.view-seg .seg-b { flex: none; padding: 4px 12px; overflow: visible; }
 button.start {
   position: absolute; inset: 0; display: grid; place-content: center; gap: 6px; width: 100%;
   border: none; border-radius: var(--radius); background: rgba(10, 12, 16, 0.55); color: #fff;

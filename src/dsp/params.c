@@ -373,6 +373,48 @@ static int wave_view(const drz_inst_t *I, char *buf, int cap) {
     return 128;
 }
 
+/* wave_strip (web UI only, plan/11 section 4): what the browser draws in place of the bars.
+ *   Scan:   "S" then 16 slices of 48 signed-byte points (hex), about two periods of the root at
+ *           evenly spaced places along the tape ((j + 0.5) / 16): the tape as a wavetable.
+ *   Sample: "M" then 256 min/max pairs (hex) over the whole file, from the loader.
+ *   Live:   "L" alone (the ring moves too much to draw as slices; the page keeps the bars).
+ * Scan reads 768 points on demand; the sample outline is made once, by the loader thread. */
+static int wave_strip(const drz_inst_t *I, char *buf, int cap) {
+    static const char HEX[] = "0123456789ABCDEF";
+    if (cap < 2 + 4 * DRZ_ENV || cap < 2 + 2 * DRZ_STRIP * DRZ_STRIP_PTS) return -1;
+    const buffer_t *b = &I->buf;
+    int n = 1;
+    if (I->sp.type == SRC_TYPE_SAMPLE) {
+        buf[0] = 'M';
+        if (I->smp_ready)
+            for (int i = 0; i < 2 * DRZ_ENV; i++) {
+                int v = I->smp_env[i] + 128;
+                buf[n++] = HEX[v >> 4];
+                buf[n++] = HEX[v & 15];
+            }
+    } else if (b->mode == BUF_MODE_SCAN) {
+        buf[0] = 'S';
+        int32_t len = buffer_readable(I);
+        float span = clampf(2.0f * DRZ_FS / semis_to_hz(I->v[P_SRC_ROOT]), 64.0f, 4096.0f);
+        if (b->front >= 0 && len > (int32_t)span + 8) {
+            const float *d = I->data[b->front];
+            for (int j = 0; j < DRZ_STRIP; j++) {
+                int32_t at = (int32_t)(((float)j + 0.5f) / (float)DRZ_STRIP * (float)(len - (int32_t)span - 4));
+                for (int i = 0; i < DRZ_STRIP_PTS; i++) {
+                    int32_t k = clampi(at + (int32_t)(span * (float)i / (float)DRZ_STRIP_PTS), 0, len - 1);
+                    int v = (int)lrintf(clampf(d[k], -1.0f, 1.0f) * 127.0f) + 128;
+                    buf[n++] = HEX[v >> 4];
+                    buf[n++] = HEX[v & 15];
+                }
+            }
+        }
+    } else {
+        buf[0] = 'L';
+    }
+    buf[n] = 0;
+    return n;
+}
+
 /* ------------------------------------------------------------------ set / get */
 
 void params_set(drz_inst_t *I, const char *key, const char *val) {
@@ -430,6 +472,7 @@ int params_get(drz_inst_t *I, const char *key, char *buf, int buf_len) {
     if (strcmp(key, "mm_items") == 0) return mm_items(I, buf, buf_len);
     if (strcmp(key, "grain_view") == 0) return grains_view(I, buf, buf_len);
     if (strcmp(key, "wave_view") == 0) return wave_view(I, buf, buf_len);
+    if (strcmp(key, "wave_strip") == 0) return wave_strip(I, buf, buf_len);
     if (strcmp(key, "smp_status") == 0) return smp_status(I, buf, buf_len);
     if (strcmp(key, "smp_file") == 0) return smp_path(I, buf, buf_len);
     if (strcmp(key, "split_voices") == 0) return copy_out("", 0, buf, buf_len);
