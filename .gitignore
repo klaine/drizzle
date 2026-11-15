@@ -1,0 +1,15 @@
+# Build outputs (scripts/build.sh). The module package is attached to a release, not committed.
+build/
+drizzle-module.tar.gz
+modules/sound_generators/drizzle/*
+!modules/sound_generators/drizzle/.gitkeep
+*.so.o
+
+# Local copies of Schwung's docs and sources (the ABI reference)
+docs/_*
+
+# Regenerable and local files
+__pycache__/
+*.pyc
+.DS_Store
+.claude/
