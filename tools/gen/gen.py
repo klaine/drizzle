@@ -154,7 +154,10 @@ def ui_hierarchy():
     levels["category"] = {"label": "Patch Category", "items_param": "pb_cats", "select_param": "pb_cat",
                           "navigate_to": "factory", "params": []}
     for lid, label, knobs, _ms in shown:
-        levels[lid] = {"label": label, "knobs": [knob_key(k) for k in knobs], "params": [knob_entry(k) for k in knobs]}
+        if isinstance(knobs, dict):  # a list page (items + selector)
+            levels[lid] = dict({"label": label}, **knobs, params=[])
+        else:
+            levels[lid] = {"label": label, "knobs": [knob_key(k) for k in knobs], "params": [knob_entry(k) for k in knobs]}
     return {"levels": levels}
 
 
@@ -372,7 +375,7 @@ def ui_meta(presets):
         return list(k) if isinstance(k, tuple) else k
     pages = [{"id": "root", "label": "Main", "knobs": [kn(k) for k in PM.ROOT_KNOBS]}]
     pages += [{"id": lid, "label": label, "knobs": [kn(k) for k in knobs]}
-              for lid, label, knobs, ms in PM.LEVELS if ms <= PM.MILESTONE]
+              for lid, label, knobs, ms in PM.LEVELS if ms <= PM.MILESTONE and not isinstance(knobs, dict)]
     return {"params": params, "pages": pages, "categories": [{"id": c, "label": l} for c, l in PM.CATEGORIES],
             "patches": [{"name": n, "cat": c} for n, c, _r in presets],
             "modSources": PM.MOD_SOURCES, "modDests": PM.MOD_DESTS, "mmSlots": PM.MM_SLOTS,

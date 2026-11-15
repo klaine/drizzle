@@ -62,6 +62,10 @@ static const char *const OPTS_MM11_DST[] = {"None", "Position", "Spray", "Size",
 static const char *const OPTS_MM12_SRC[] = {"None", "Amp Env", "Mod Env", "LFO 1", "LFO 2", "Source LFO", "Sweep", "Velocity", "Rel Velocity", "Key", "Poly AT", "Chan AT", "Pressure", "Mod Wheel", "Breath", "Expression", "Sustain", "Bend", "Macro 1", "Macro 2", "Macro 3", "Macro 4", "Random", "Voice Index"};
 static const char *const OPTS_MM12_VIA[] = {"None", "Amp Env", "Mod Env", "LFO 1", "LFO 2", "Source LFO", "Sweep", "Velocity", "Rel Velocity", "Key", "Poly AT", "Chan AT", "Pressure", "Mod Wheel", "Breath", "Expression", "Sustain", "Bend", "Macro 1", "Macro 2", "Macro 3", "Macro 4", "Random", "Voice Index"};
 static const char *const OPTS_MM12_DST[] = {"None", "Position", "Spray", "Size", "Density", "Jitter", "Scan", "Pitch", "Pitch Spray", "Reverse", "Spread", "Probability", "Level Spray", "Lock", "Timbre", "Fold", "Tone", "Source Pitch", "Osc B Level", "Cross-mod", "Cutoff", "Resonance", "Filter Drive", "Level", "Pan", "LFO 1 Rate", "LFO 2 Rate", "S.LFO Rate", "Crush", "Chorus Level", "Delay Feedback", "Reverb Level", "Reverb Size"};
+static const char *const OPTS_MM_SRC[] = {"None", "Amp Env", "Mod Env", "LFO 1", "LFO 2", "Source LFO", "Sweep", "Velocity", "Rel Velocity", "Key", "Poly AT", "Chan AT", "Pressure", "Mod Wheel", "Breath", "Expression", "Sustain", "Bend", "Macro 1", "Macro 2", "Macro 3", "Macro 4", "Random", "Voice Index"};
+static const char *const OPTS_MM_VIA[] = {"None", "Amp Env", "Mod Env", "LFO 1", "LFO 2", "Source LFO", "Sweep", "Velocity", "Rel Velocity", "Key", "Poly AT", "Chan AT", "Pressure", "Mod Wheel", "Breath", "Expression", "Sustain", "Bend", "Macro 1", "Macro 2", "Macro 3", "Macro 4", "Random", "Voice Index"};
+static const char *const OPTS_MM_DST[] = {"None", "Position", "Spray", "Size", "Density", "Jitter", "Scan", "Pitch", "Pitch Spray", "Reverse", "Spread", "Probability", "Level Spray", "Lock", "Timbre", "Fold", "Tone", "Source Pitch", "Osc B Level", "Cross-mod", "Cutoff", "Resonance", "Filter Drive", "Level", "Pan", "LFO 1 Rate", "LFO 2 Rate", "S.LFO Rate", "Crush", "Chorus Level", "Delay Feedback", "Reverb Level", "Reverb Size"};
+static const char *const OPTS_MM_CLEAR[] = {"--", "Clear"};
 static const char *const OPTS_CR_TYPE[] = {"Soft", "Hard", "Fold", "Bits"};
 static const char *const OPTS_CHO_TYPE[] = {"Chorus 1", "Chorus 2", "Ensemble"};
 static const char *const OPTS_DLY_SYNC[] = {"Off", "1/32T", "1/32", "1/16T", "1/16", "1/16D", "1/8T", "1/8", "1/8D", "1/4T", "1/4", "1/4D", "1/2T", "1/2", "1/1T", "1/2D", "1 bar"};
@@ -244,6 +248,13 @@ const param_desc_t DRZ_PARAMS[P_COUNT] = {
     [P_MM12_VIA] = {"mm12_via", PK_ENUM, 24, PF_STATE, 0.0f, 23.0f, 0.0f, OPTS_MM12_VIA},
     [P_MM12_DST] = {"mm12_dst", PK_ENUM, 33, PF_STATE, 0.0f, 32.0f, 0.0f, OPTS_MM12_DST},
     [P_MM12_DEP] = {"mm12_dep", PK_FLOAT, 0, PF_STATE, -1.0f, 1.0f, 0.0f, 0},
+    [P_MM_SEL] = {"mm_sel", PK_INT, 0, 0, 0.0f, 11.0f, 0.0f, 0},
+    [P_MM_SLOT] = {"mm_slot", PK_INT, 0, PF_CP, 1.0f, 12.0f, 1.0f, 0},
+    [P_MM_SRC] = {"mm_src", PK_ENUM, 24, PF_CP, 0.0f, 23.0f, 0.0f, OPTS_MM_SRC},
+    [P_MM_VIA] = {"mm_via", PK_ENUM, 24, PF_CP, 0.0f, 23.0f, 0.0f, OPTS_MM_VIA},
+    [P_MM_DST] = {"mm_dst", PK_ENUM, 33, PF_CP, 0.0f, 32.0f, 0.0f, OPTS_MM_DST},
+    [P_MM_DEP] = {"mm_dep", PK_FLOAT, 0, PF_CP, -1.0f, 1.0f, 0.0f, 0},
+    [P_MM_CLEAR] = {"mm_clear", PK_ENUM, 2, PF_CP, 0.0f, 1.0f, 0.0f, OPTS_MM_CLEAR},
     [P_CR_LVL] = {"cr_lvl", PK_FLOAT, 0, PF_STATE|PF_CP, 0.0f, 1.0f, 0.0f, 0},
     [P_CR_TYPE] = {"cr_type", PK_ENUM, 4, PF_STATE|PF_CP, 0.0f, 3.0f, 0.0f, OPTS_CR_TYPE},
     [P_CR_TONE] = {"cr_tone", PK_FLOAT, 0, PF_STATE|PF_CP, 0.0f, 1.0f, 0.7f, 0},
@@ -314,13 +325,15 @@ const uint16_t DRZ_PARAMS_SORTED[P_COUNT] = {
     P_MM08_SRC, P_MM08_VIA, P_MM09_DEP, P_MM09_DST, P_MM09_SRC, P_MM09_VIA,
     P_MM10_DEP, P_MM10_DST, P_MM10_SRC, P_MM10_VIA, P_MM11_DEP, P_MM11_DST,
     P_MM11_SRC, P_MM11_VIA, P_MM12_DEP, P_MM12_DST, P_MM12_SRC, P_MM12_VIA,
-    P_PATCH_VOL, P_REV_DAMP, P_REV_DECAY, P_REV_FRZ, P_REV_HP, P_REV_HPF,
-    P_REV_LPF, P_REV_LVL, P_REV_MDEP, P_REV_MRATE, P_REV_PRE, P_REV_SIZE,
-    P_REV_TYPE, P_SL_FOLD, P_SL_PITCH, P_SL_RATE, P_SL_SYNC, P_SL_TIMB,
-    P_SL_TONE, P_SL_WAVE, P_SMP_END, P_SMP_NORM, P_SMP_ROOT, P_SMP_START,
-    P_SRC_FOLD, P_SRC_ROOT, P_SRC_SEED, P_SRC_TONE, P_SRC_TRACK, P_SRC_TYPE,
-    P_SW_CURVE, P_SW_FOLD, P_SW_MODE, P_SW_PITCH, P_SW_TIMB, P_SW_TIME,
-    P_SW_TONE, P_V_BEND, P_V_FLAV, P_V_GLIDE, P_V_MODE, P_V_OCT,
-    P_V_PAN, P_V_VOICES, P_WT_A_TABLE, P_WT_A_WAVE, P_WT_B_FINE, P_WT_B_LVL,
-    P_WT_B_SEMI, P_WT_B_TABLE, P_WT_B_WAVE, P_WT_Q, P_WT_XAMT, P_WT_XMOD,
+    P_MM_CLEAR, P_MM_DEP, P_MM_DST, P_MM_SEL, P_MM_SLOT, P_MM_SRC,
+    P_MM_VIA, P_PATCH_VOL, P_REV_DAMP, P_REV_DECAY, P_REV_FRZ, P_REV_HP,
+    P_REV_HPF, P_REV_LPF, P_REV_LVL, P_REV_MDEP, P_REV_MRATE, P_REV_PRE,
+    P_REV_SIZE, P_REV_TYPE, P_SL_FOLD, P_SL_PITCH, P_SL_RATE, P_SL_SYNC,
+    P_SL_TIMB, P_SL_TONE, P_SL_WAVE, P_SMP_END, P_SMP_NORM, P_SMP_ROOT,
+    P_SMP_START, P_SRC_FOLD, P_SRC_ROOT, P_SRC_SEED, P_SRC_TONE, P_SRC_TRACK,
+    P_SRC_TYPE, P_SW_CURVE, P_SW_FOLD, P_SW_MODE, P_SW_PITCH, P_SW_TIMB,
+    P_SW_TIME, P_SW_TONE, P_V_BEND, P_V_FLAV, P_V_GLIDE, P_V_MODE,
+    P_V_OCT, P_V_PAN, P_V_VOICES, P_WT_A_TABLE, P_WT_A_WAVE, P_WT_B_FINE,
+    P_WT_B_LVL, P_WT_B_SEMI, P_WT_B_TABLE, P_WT_B_WAVE, P_WT_Q, P_WT_XAMT,
+    P_WT_XMOD,
 };

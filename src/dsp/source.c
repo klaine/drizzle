@@ -302,10 +302,12 @@ static void render_analog(const src_par_t *p, source_t *s, float sha, float shb,
 
 void source_render(const src_par_t *p, source_t *s, float sw, float semis, float *out, int n) {
     float sv = sweep_shape(p, sw), lv = slfo_tick(p, s, n);
-    float timb = p->sw_timb * sv + p->sl_timb * lv;
-    float fo = clampf(p->fold + p->sw_fold * sv + p->sl_fold * lv, 0.0f, 1.0f);
-    float tone = clampf(p->tone + p->sw_tone * sv + p->sl_tone * lv, 0.0f, 1.0f);
-    float pitch = p->root + semis + p->sw_pitch * sv + p->sl_pitch * lv;
+    s->sweep_v = sv;
+    s->lfo_v = lv;
+    float timb = p->sw_timb * sv + p->sl_timb * lv + p->m_timb;
+    float fo = clampf(p->fold + p->sw_fold * sv + p->sl_fold * lv + p->m_fold, 0.0f, 1.0f);
+    float tone = clampf(p->tone + p->sw_tone * sv + p->sl_tone * lv + p->m_tone, 0.0f, 1.0f);
+    float pitch = p->root + semis + p->sw_pitch * sv + p->sl_pitch * lv + p->m_pitch;
     if (p->type == SRC_TYPE_WAVETABLE) {
         render_wavetable(p, s, timb, pitch, out, n);
     } else if (p->type == SRC_TYPE_ANALOG) {

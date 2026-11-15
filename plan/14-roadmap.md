@@ -51,10 +51,10 @@ Move, state round-trips, `cpu_us` ≤ 500 µs with 8 voices and 64 grains.
 **Accept:** worst case without FX ≤ 650 µs on the device; listening checklist items 1–4 pass.
 
 ## M3 — Rhythm & modulation
-- [ ] Tempo mode on the host clock, swing, probability, repeats, Free/Note/Bar random.
-- [ ] LFO 1 and 2 with direct depths, pressure page, 12-slot matrix with list editor, macros.
-- [ ] Crush **Bits**, reverb **Cloud** and **freeze**.
-- [ ] `:effective` live values; matrix, LFO, rhythm suites.
+- [x] Tempo mode on the host clock (internal clock when stopped), swing, probability, repeats, Free/Note/Bar random.
+- [x] LFO 1 and 2 with direct depths, pressure page, 12-slot matrix with list editor, macros.
+- [x] Crush **Bits** (Crest's crush), reverb **Cloud** and **freeze**.
+- [x] `:effective` live values; matrix, LFO, rhythm and reverb suites.
 
 **Accept:** a 1/16 Tempo pattern stays on Move's grid for 5 minutes; "Wheel × LFO 2 → Position" and
 "Poly AT → Density" work on the device; the full worst case ≤ 900 µs p99.

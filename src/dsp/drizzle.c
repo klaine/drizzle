@@ -39,6 +39,7 @@ static drz_inst_t *claim(drz_inst_t *p) {
     p->rng = 0x9E3779B1u * (uint32_t)(slot + 1) | 1u;
     p->bpm = 120.0f;
     p->frng = 0x51ED270Bu * (uint32_t)(slot + 1) | 1u;
+    p->expr = p->s_expr = 1.0f;
     p->scale_mask = 0x0FFF;
     params_defaults(p);
     source_prepare(p);
@@ -124,11 +125,30 @@ static void voice_start(drz_inst_t *I, voice_t *v, int note, int vel, int legato
     if (legato) return;
     v->next = 0.0f; /* the first grain starts at note-on */
     v->scan_off = 0.0f;
+    v->rpt_left = 0;
+    v->polyat = 0.0f;
+    v->polyat_age = 1u << 20;
+    v->rvel = 0.0f;
+    /* Random (plan/06 section 2): Free draws from the instance; Note and Bar from the seed and the key,
+     * so the same key plays the same pattern (Bar also reseeds at every bar). Flavour follows. */
+    uint32_t seed;
+    if ((int)I->v[P_GR_RND] == GR_RND_FREE) seed = rng_u32(&I->rng);
+    else seed = seed_hash((uint32_t)I->v[P_GR_SEED], (uint32_t)note);
+    v->vrng = seed;
+    v->prng = seed_hash(seed, 0x5EEDu);
+    uint32_t fr = (int)I->v[P_GR_RND] == GR_RND_FREE ? rng_u32(&I->frng) : seed_hash(seed, 0xF1A7u);
+    v->rnd = rng_bi(&fr);
+    v->l1sh0 = rng_bi(&fr);
+    v->l1sh1 = rng_bi(&fr);
+    int l1t = (int)I->v[P_L1_TRIG];
+    if (l1t == L1_TRIG_NOTE) v->l1ph = 0.0f;
+    else if (l1t == L1_TRIG_NOTE_RANDOM) v->l1ph = rng_uni(&fr);
+    v->last_step = DRZ_STEP_NEW; /* Tempo: placed on the grid by the next sub-block (grain.c) */
     float f = I->v[P_V_FLAV]; /* Flavour: small per-note offsets (plan/07 section 1) */
-    v->flav[0] = 0.1f * f * rng_bi(&I->frng);
-    v->flav[1] = 0.5f * f * rng_bi(&I->frng);
-    v->flav[2] = 15.0f * f * rng_bi(&I->frng);
-    v->flav[3] = 0.5f * f * rng_bi(&I->frng);
+    v->flav[0] = 0.1f * f * rng_bi(&fr);
+    v->flav[1] = 0.5f * f * rng_bi(&fr);
+    v->flav[2] = 15.0f * f * rng_bi(&fr);
+    v->flav[3] = 0.5f * f * rng_bi(&fr);
     env_trigger(&v->amp, 0);
     if (I->v[P_ME_TRIG] != ME_TRIG_FIRST || I->keys_down <= 1 || v->mod.stage == ES_IDLE) env_trigger(&v->mod, 0);
 }
@@ -148,7 +168,10 @@ static void held_remove(drz_inst_t *I, int note) {
 }
 
 static void note_on(drz_inst_t *I, int note, int vel) {
-    if (I->keys_down == 0) I->src_live.sweep_s = 0.0f; /* the Live sweep restarts with a new phrase */
+    if (I->keys_down == 0) {
+        I->src_live.sweep_s = 0.0f; /* the Live sweep restarts with a new phrase */
+        if (!I->transport) I->beat = I->int_beat = 0.0; /* and so does the internal tempo clock */
+    }
     held_remove(I, note);
     if (I->nheld == (int)sizeof I->held) held_remove(I, I->held[0]);
     I->held[I->nheld++] = (uint8_t)note;
@@ -183,7 +206,9 @@ static void note_on(drz_inst_t *I, int note, int vel) {
     I->sustained[pick - I->voice] = 0;
 }
 
-static void note_off(drz_inst_t *I, int note) {
+static void note_off(drz_inst_t *I, int note, int rvel) {
+    for (int i = 0; i < DRZ_VOICES; i++)
+        if (I->voice[i].active && I->voice[i].note == note) I->voice[i].rvel = (float)rvel * (1.0f / 127.0f);
     held_remove(I, note);
     if (I->keys_down > 0) I->keys_down--;
     if (I->v[P_V_MODE] != V_MODE_POLY) {
@@ -221,20 +246,12 @@ void voices_all_off(drz_inst_t *I, int hard) {
     I->nheld = 0;
 }
 
-/* Per sub-block: glide, the Mod envelope and its direct depths into dst[] (M3 adds LFOs, pressure and
- * the matrix to the same sums), and the filter's coefficients. */
-static void voice_control(drz_inst_t *I, voice_t *v, const env_par_t *ap, const env_par_t *mp, float glide_c) {
-    const float *pv = I->v;
+/* Per sub-block: the envelopes, glide, and the voice's modulation (mod.c). */
+static void voice_control(drz_inst_t *I, voice_t *v, int vi, const env_par_t *ap, const env_par_t *mp, float glide_c) {
     env_tick(&v->amp, ap);
-    float me = env_tick(&v->mod, mp) * v->mod_vel;
+    env_tick(&v->mod, mp);
     v->pitch = v->pitch_tgt + (v->pitch - v->pitch_tgt) * glide_c;
-    float *d = v->dst;
-    memset(d, 0, sizeof v->dst);
-    d[MD_POSITION] = pv[P_ME_POS] * me;
-    d[MD_SIZE] = pv[P_ME_SIZE] * me;
-    d[MD_DENSITY] = pv[P_ME_DENS] * me;
-    d[MD_PITCH] = pv[P_ME_PITCH] * me * (1.0f / 24.0f);
-    d[MD_CUTOFF] = pv[P_FLT_ENV] * me;
+    mod_voice(I, v, vi);
 }
 
 /* The voice's filter over one sub-block of its grains (plan/07 section 3). */
@@ -277,9 +294,20 @@ static void drz_on_midi(void *instance, const uint8_t *msg, int len, int source)
             break;
         }
         /* fall through: note-on with velocity 0 is a note-off */
-    case 0x80: note_off(I, d1); break;
+    case 0x80: note_off(I, d1, st == 0x80 ? d2 : 64); break;
+    case 0xA0:
+        for (int i = 0; i < DRZ_VOICES; i++)
+            if (I->voice[i].active && I->voice[i].note == d1) {
+                I->voice[i].polyat = (float)d2 * (1.0f / 127.0f);
+                I->voice[i].polyat_age = 0;
+            }
+        break;
+    case 0xD0: I->chanat = (float)d1 * (1.0f / 127.0f); break;
     case 0xB0:
         switch (d1) {
+        case 1: I->wheel = (float)d2 * (1.0f / 127.0f); break;
+        case 2: I->breath = (float)d2 * (1.0f / 127.0f); break;
+        case 11: I->expr = (float)d2 * (1.0f / 127.0f); break;
         case 64:
             I->sustain_down = d2 >= 64;
             if (!I->sustain_down)
@@ -296,7 +324,10 @@ static void drz_on_midi(void *instance, const uint8_t *msg, int len, int source)
             break;
         }
         case 120: voices_all_off(I, 1); break;
-        case 121: I->bend = 0.0f; break;
+        case 121:
+            I->bend = I->wheel = I->breath = I->chanat = 0.0f;
+            I->expr = 1.0f;
+            break;
         case 123: voices_all_off(I, 0); break;
         default: break;
         }
@@ -327,9 +358,54 @@ static inline float soft_clip(float x) {
     return x < 0.0f ? -y : y;
 }
 
+/* Beats per grid step of gr_div (params.py GR_DIVS). */
+float drz_step_beats(const drz_inst_t *I) {
+    static const float BEATS[14] = {1.0f / 16.0f, 1.0f / 12.0f, 0.125f, 1.0f / 6.0f, 0.25f, 0.375f, 1.0f / 3.0f,
+                                    0.5f, 0.75f, 2.0f / 3.0f, 1.0f, 1.5f, 2.0f, 4.0f};
+    return BEATS[clampi((int)I->v[P_GR_DIV], 0, 13)];
+}
+
+/* The Tempo grid steps that start in this sub-block of n samples: step k starts at beat k * S, every
+ * second step delayed by swing * S / 2. Also notes whether a bar starts (Random = Bar). */
+static void tempo_steps(drz_inst_t *I, int n) {
+    double S = (double)drz_step_beats(I), sw = (double)I->v[P_GR_SWING] * S * 0.5;
+    double bps = (double)I->bpm / (60.0 * (double)DRZ_FS);
+    double b0 = I->beat, b1 = b0 + (double)n * bps;
+    if (b0 < I->beat_end - 1e-6) /* the transport jumped back (a restart): every voice finds its step again */
+        for (int vi = 0; vi < DRZ_VOICES; vi++) I->voice[vi].last_step = DRZ_STEP_NEW;
+    I->beat_end = b1;
+    I->n_steps = 0;
+    for (int64_t k = (int64_t)floor(b0 / S) - 1; k <= (int64_t)floor(b1 / S) + 1 && I->n_steps < DRZ_SUB; k++) {
+        double t = (double)k * S + ((k & 1) ? sw : 0.0);
+        if (t > b0 && t < b1) {
+            int off = (int)((t - b0) / bps);
+            I->step_off[I->n_steps] = (uint8_t)(off < n ? off : n - 1);
+            I->step_idx[I->n_steps++] = k;
+        }
+    }
+    /* a note that landed just after a step (last_step < the current step) plays it now */
+    int64_t cur = (int64_t)floor(b0 / S);
+    if (((cur & 1) ? (double)cur * S + sw : (double)cur * S) > b0) cur--;
+    double tc = (double)cur * S + ((cur & 1) ? sw : 0.0), tn = (double)(cur + 1) * S + (((cur + 1) & 1) ? sw : 0.0);
+    I->step_cur = cur;
+    I->step_frac = (float)((b0 - tc) / (tn - tc));
+    if (I->n_steps == 0 || I->step_idx[0] != cur) {
+        for (int i = I->n_steps; i > 0; i--) {
+            I->step_off[i < DRZ_SUB ? i : DRZ_SUB - 1] = I->step_off[i - 1];
+            I->step_idx[i < DRZ_SUB ? i : DRZ_SUB - 1] = I->step_idx[i - 1];
+        }
+        I->step_off[0] = 0;
+        I->step_idx[0] = cur;
+        if (I->n_steps < DRZ_SUB) I->n_steps++;
+    }
+    I->bar_start = floor(b1 / 4.0) > floor(b0 / 4.0) || (b0 == 0.0 && b1 > 0.0);
+    I->beat = b1;
+}
+
 static void apply_params(drz_inst_t *I) {
     I->pdirty = 0;
     source_prepare(I);
+    I->sp_live = I->sp;
     buffer_t *b = &I->buf;
     int mode = (int)I->v[P_BUF_MODE];
     if (mode != b->mode) buffer_set_mode(I, mode);
@@ -354,6 +430,20 @@ static void drz_render_block(void *instance, int16_t *out, int frames) {
         float bpm = g_host->get_bpm();
         I->bpm = bpm > 20.0f && bpm < 400.0f ? bpm : 120.0f;
     }
+    /* the beat: the host's while its transport runs, else the internal clock (plan/06 section 2) */
+    int was = I->transport;
+    I->transport = 0;
+    if (g_host && g_host->get_clock_status && g_host->get_beat_position &&
+        g_host->get_clock_status() == MOVE_CLOCK_STATUS_RUNNING) {
+        double bt = g_host->get_beat_position();
+        if (bt >= 0.0) {
+            I->beat = bt;
+            I->transport = 1;
+        }
+    }
+    if (!I->transport && was) I->beat = I->int_beat;
+    for (int vi = 0; vi < DRZ_VOICES; vi++)
+        if (I->voice[vi].polyat_age < (1u << 20)) I->voice[vi].polyat_age++;
     env_par_t ep = {I->v[P_AE_A], I->v[P_AE_D], I->v[P_AE_S], I->v[P_AE_R]};
     env_par_t mp = {I->v[P_ME_A], I->v[P_ME_D], I->v[P_ME_S], I->v[P_ME_R]};
     float gt = glide_time(I), glide_c = gt > 0.0f ? expf(-DRZ_CTL_DT * 3.0f / gt) : 0.0f;
@@ -384,12 +474,25 @@ static void drz_render_block(void *instance, int16_t *out, int frames) {
             float env0[DRZ_VOICES];
             memset(vl, 0, sizeof vl);
             memset(vr, 0, sizeof vr);
+            mod_global(I, n);
+            tempo_steps(I, n);
+            if (I->bar_start && (int)I->v[P_GR_RND] == GR_RND_BAR) /* the pattern starts again every bar */
+                for (int vi = 0; vi < DRZ_VOICES; vi++) {
+                    voice_t *v = &I->voice[vi];
+                    if (!v->active) continue;
+                    v->vrng = seed_hash((uint32_t)I->v[P_GR_SEED], v->note);
+                    v->prng = seed_hash(v->vrng, 0x5EEDu);
+                    v->rpt_left = 0;
+                }
             for (int vi = 0; vi < DRZ_VOICES; vi++) {
                 voice_t *v = &I->voice[vi];
                 env0[vi] = v->amp.y;
                 if (!v->active) continue;
-                voice_control(I, v, &ep, &mp, glide_c);
-                if (readable > 0) v->scan_off += scan * (float)n / (float)readable;
+                voice_control(I, v, vi, &ep, &mp, glide_c);
+                if (readable > 0) {
+                    float sc = v->dst[MD_SCAN] != 0.0f ? map_scan(clampf(I->v[P_GR_SCAN] + 4.0f * v->dst[MD_SCAN], -4.0f, 4.0f)) : scan;
+                    v->scan_off += sc * (float)n / (float)readable;
+                }
                 voice_spawn_grains(I, v, vi, n, base + sb);
             }
             grains_render(I, vl, vr, n, base + sb);
@@ -398,7 +501,7 @@ static void drz_render_block(void *instance, int16_t *out, int frames) {
                 voice_t *v = &I->voice[vi];
                 if (!v->active) continue;
                 voice_filter(I, v, vl[vi], vr[vi], n);
-                float k = VOICE_GAIN * v->vel_gain;
+                float k = VOICE_GAIN * v->vel_gain * clampf(1.0f + v->dst[MD_LEVEL], 0.0f, 2.0f);
                 float g = env0[vi] * k, dg = (v->amp.y - env0[vi]) * k / (float)n;
                 for (int i = 0; i < n; i++, g += dg) {
                     I->busl[sb + i] += vl[vi][i] * g;
@@ -421,7 +524,16 @@ static void drz_render_block(void *instance, int16_t *out, int frames) {
             source_reset(&I->src_live, (uint32_t)I->v[P_SRC_SEED]);
             I->nan_resets++;
         }
-        fx_process(&I->fx, I->v, I->bpm, I->busl, I->busr, cnt);
+        /* effect levels from the matrix (plan/08 section 4) */
+        float fxv[P_COUNT];
+        memcpy(fxv, I->v, sizeof fxv);
+        const float *gd = I->gdst;
+        fxv[P_CR_LVL] = clampf(fxv[P_CR_LVL] + gd[MD_CRUSH], 0.0f, 1.0f);
+        fxv[P_CHO_LVL] = clampf(fxv[P_CHO_LVL] + gd[MD_CHORUS_LEVEL], 0.0f, 1.0f);
+        fxv[P_DLY_FB] = clampf(fxv[P_DLY_FB] + gd[MD_DELAY_FEEDBACK], 0.0f, 1.0f);
+        fxv[P_REV_LVL] = clampf(fxv[P_REV_LVL] + gd[MD_REVERB_LEVEL], 0.0f, 1.0f);
+        fxv[P_REV_SIZE] = clampf(fxv[P_REV_SIZE] + gd[MD_REVERB_SIZE], 0.0f, 1.0f);
+        fx_process(&I->fx, fxv, I->bpm, I->busl, I->busr, cnt);
         float vol = 2.0f * sqrf(I->v[P_PATCH_VOL]), dv = (vol - I->vol_cur) / (float)cnt;
         int16_t *o = out + 2 * done;
         for (int i = 0; i < cnt; i++) {
@@ -434,6 +546,7 @@ static void drz_render_block(void *instance, int16_t *out, int frames) {
         I->vol_cur = vol;
         done += cnt;
     }
+    if (!I->transport) I->int_beat = I->beat;
     ftz_exit(fp);
 #ifdef DRZ_PROFILE
     clock_gettime(CLOCK_MONOTONIC, &t1);

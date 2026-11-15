@@ -80,10 +80,47 @@ static int put_int(int v, char *buf, int cap) {
     return n >= cap ? -1 : n;
 }
 
+/* ------------------------------------------------------------------ matrix proxies (plan/08 section 4) */
+
+static int sel_slot(const drz_inst_t *I) { return clampi((int)I->v[P_MM_SEL], 0, DRZ_MM_SLOTS - 1); }
+
+/* The proxies show the selected slot; refresh them after the selection or the slots changed. */
+static void proxies_refresh(drz_inst_t *I) {
+    int base = P_MM01_SRC + 4 * sel_slot(I);
+    I->v[P_MM_SLOT] = (float)(sel_slot(I) + 1);
+    I->v[P_MM_SRC] = I->v[base];
+    I->v[P_MM_VIA] = I->v[base + 1];
+    I->v[P_MM_DST] = I->v[base + 2];
+    I->v[P_MM_DEP] = I->v[base + 3];
+    I->v[P_MM_CLEAR] = 0.0f;
+}
+
+/* A write to a proxy lands in the slot it stands for. */
+static void proxy_written(drz_inst_t *I, int id) {
+    int base = P_MM01_SRC + 4 * sel_slot(I);
+    switch (id) {
+    case P_MM_SEL: break;
+    case P_MM_SLOT: I->v[P_MM_SEL] = I->v[P_MM_SLOT] - 1.0f; break;
+    case P_MM_SRC: I->v[base] = I->v[P_MM_SRC]; break;
+    case P_MM_VIA: I->v[base + 1] = I->v[P_MM_VIA]; break;
+    case P_MM_DST: I->v[base + 2] = I->v[P_MM_DST]; break;
+    case P_MM_DEP: I->v[base + 3] = I->v[P_MM_DEP]; break;
+    case P_MM_CLEAR:
+        if (I->v[P_MM_CLEAR] >= 0.5f)
+            for (int i = 0; i < 4; i++) I->v[base + i] = 0.0f;
+        break;
+    default:
+        if (id >= P_MM01_SRC && id <= P_MM12_DEP) break; /* a raw slot: the proxies follow */
+        return;
+    }
+    proxies_refresh(I);
+}
+
 /* A new patch: every voice and grain fades, the buffer starts over (a Scan tape renders at once, a
  * saved Live freeze waits for the ring to refill), and the effect tails are dropped. */
 static void patch_loaded(drz_inst_t *I) {
     I->pdirty = 1;
+    proxies_refresh(I);
     voices_all_off(I, 1);
     buffer_reset(I);
     if (I->v[P_BUF_FREEZE] >= 0.5f) I->buf.wait_full = 1;
@@ -282,9 +319,10 @@ void params_set(drz_inst_t *I, const char *key, const char *val) {
     int id = params_find(key);
     float f;
     if (id < 0 || !parse_value(id, val, (int)strlen(val), &f)) return;
-    if (f == I->v[id]) return; /* Scenes resend unchanged values every block */
+    if (f == I->v[id] && id != P_MM_CLEAR) return; /* Scenes resend unchanged values every block */
     I->v[id] = f;
     I->pdirty = 1;
+    proxy_written(I, id);
     if (is_source_key(id)) buffer_source_changed(I);
 }
 
@@ -303,6 +341,7 @@ int params_get(drz_inst_t *I, const char *key, char *buf, int buf_len) {
     if (strcmp(key, "pb_count") == 0) return put_int(browse_count(I), buf, buf_len);
     if (strcmp(key, "pb_index") == 0) return put_int(browse_pos(I), buf, buf_len);
     if (strcmp(key, "buf_view") == 0) return buf_view(I, buf, buf_len);
+    if (strcmp(key, "mm_items") == 0) return mm_items(I, buf, buf_len);
     if (strcmp(key, "grain_view") == 0) return grains_view(I, buf, buf_len);
     if (strcmp(key, "smp_status") == 0) return copy_out("none", 4, buf, buf_len);
     if (strcmp(key, "split_voices") == 0) return copy_out("", 0, buf, buf_len);
@@ -313,7 +352,7 @@ int params_get(drz_inst_t *I, const char *key, char *buf, int buf_len) {
     }
 #endif
     const char *colon = strchr(key, ':');
-    if (colon && strcmp(colon, ":effective") == 0) { /* modulation arrives with M3: the base value */
+    if (colon && strcmp(colon, ":effective") == 0) { /* the newest voice's modulated value (mod.c) */
         char base[40];
         int kl = (int)(colon - key);
         if (kl <= 0 || kl >= (int)sizeof base) return -1;
@@ -321,7 +360,9 @@ int params_get(drz_inst_t *I, const char *key, char *buf, int buf_len) {
         base[kl] = 0;
         int id = params_find(base);
         if (id < 0 || !(DRZ_PARAMS[id].flags & PF_LIVE)) return -1;
-        return format_value(id, I->v[id], buf, buf_len);
+        int e = id == P_GR_POS ? 0 : id == P_GR_SIZE ? 1 : id == P_GR_DENS ? 2 : 3, any = 0;
+        for (int i = 0; i < DRZ_VOICES; i++) any |= I->voice[i].active;
+        return format_value(id, any ? I->eff[e] : I->v[id], buf, buf_len);
     }
     int id = params_find(key);
     if (id < 0) return -1;

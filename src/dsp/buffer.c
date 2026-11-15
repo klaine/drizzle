@@ -94,7 +94,7 @@ void buffer_set_freeze(drz_inst_t *I, int on) {
 
 /* The Live sweep: seconds since it started, as a phase 0..1 by sw_mode. */
 static float live_sweep(const drz_inst_t *I) {
-    const src_par_t *p = &I->sp;
+    const src_par_t *p = &I->sp_live;
     float x = I->src_live.sweep_s / p->sw_time;
     switch (p->sw_mode) {
     case SW_MODE_LOOP: return x - floorf(x);
@@ -138,7 +138,7 @@ static void live_block(drz_inst_t *I, int frames) {
         I->src_live.sweep_s += (float)n / DRZ_FS;
         if (b->frozen) {
             if (b->xf_k >= DRZ_XFADE) continue; /* the source rests while frozen */
-            source_render(&I->sp, &I->src_live, sw, I->track_semis, I->scratch, n);
+            source_render(&I->sp_live, &I->src_live, sw, I->track_semis, I->scratch, n);
             for (int i = 0; i < n && b->xf_k < DRZ_XFADE; i++, b->xf_k++) {
                 int32_t slot = b->ls + b->xf_k;
                 if (slot >= DRZ_RING) slot -= DRZ_RING;
@@ -147,7 +147,7 @@ static void live_block(drz_inst_t *I, int frames) {
             }
             continue;
         }
-        source_render(&I->sp, &I->src_live, sw, I->track_semis, I->scratch, n);
+        source_render(&I->sp_live, &I->src_live, sw, I->track_semis, I->scratch, n);
         int32_t slot = (int32_t)(b->w % DRZ_RING);
         /* the source's pitch for these 16 samples: grains reading them later transpose from it */
         I->track16[slot / DRZ_SUB] = (int16_t)lrintf(clampf(I->track_semis, -300.0f, 300.0f) * 100.0f);

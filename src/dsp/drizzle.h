@@ -29,6 +29,7 @@
 #define DRZ_TAPE_DEBOUNCE 2646   /* 60 ms */
 #define DRZ_BINS 128             /* display bins (plan/05 section 5) */
 #define DRZ_DENS_UNISON 3        /* extra detuned copies of Analog osc A (an_dens) */
+#define DRZ_STEP_NEW INT64_MIN   /* voice_t.last_step: resolve against the grid at the next sub-block */
 
 #ifdef _WIN32
 #define DRZ_EXPORT __declspec(dllexport)
@@ -51,6 +52,7 @@ typedef struct {
     float svf1, svf2;   /* tone filter */
     uint32_t rng;       /* noise */
     float sweep_s;      /* Live: seconds since the sweep started */
+    float sweep_v, lfo_v; /* the last Sweep and Source LFO values (matrix sources) */
     float lph;          /* Source LFO phase, cycles */
     float lsh0, lsh1;   /* Source LFO random values: previous and next (S&H, Smooth) */
     uint32_t lrng;
@@ -68,6 +70,7 @@ typedef struct {
     int sw_mode;
     int sl_wave;
     float sl_hz, sl_timb, sl_fold, sl_pitch, sl_tone;
+    float m_timb, m_fold, m_tone, m_pitch; /* Live only: matrix modulation of the source (plan/04 4.3) */
 } src_par_t;
 
 /* ------------------------------------------------------------------ buffer (plan/05) */
@@ -120,6 +123,14 @@ typedef struct {
     float next;              /* samples from the current sub-block start to the next onset */
     float scan_off;          /* Scan Speed travel since note-on, in buffer lengths */
     float dst[DRZ_MOD_DST_COUNT]; /* summed modulation per destination this sub-block (MD_*) */
+    float src[DRZ_MOD_SRC_COUNT]; /* this voice's matrix source values (MS_*) */
+    float l1ph, l1sh0, l1sh1;     /* LFO 1 phase and random values */
+    float polyat, pressure, rvel, rnd;
+    uint32_t polyat_age;          /* blocks since the last poly aftertouch for this voice */
+    uint32_t vrng, prng;          /* grain draws and onset draws (plan/06 section 2: Random modes) */
+    uint32_t rep_state;           /* vrng at the last fresh onset: repeats replay it */
+    int rpt_left;
+    int64_t last_step;            /* Tempo: the last grid step this voice played; DRZ_STEP_NEW after note-on */
     filt_t fl, fr;           /* per-voice filter, left and right (plan/07 section 3) */
     int n_grains;
 } voice_t;
@@ -153,6 +164,25 @@ typedef struct drz_inst {
     int scale_root;
     int64_t clock;                 /* output samples so far (period lock's phase reference) */
     uint32_t frng;                 /* Flavour */
+    /* controllers and global modulation (plan/08) */
+    float wheel, breath, expr, chanat;      /* raw MIDI values */
+    float s_wheel, s_breath, s_expr, s_chanat, s_mac[4], s_bend;
+    float l2ph, l2sh0, l2sh1, l2_val;
+    float gsrc[DRZ_MOD_SRC_COUNT];          /* global sources, and the newest voice's for global destinations */
+    float gdst[DRZ_MOD_DST_COUNT];          /* modulation of the destinations that are not per voice */
+    float eff[4];                           /* :effective of gr_pos, gr_size, gr_dens, flt_cut */
+    src_par_t sp_live;                      /* sp with the matrix's source modulation (Live) */
+    /* tempo (plan/06 section 2) */
+    double beat;                            /* beat position at the start of the current sub-block */
+    double int_beat;                        /* the internal clock, when the transport is stopped */
+    double beat_end;                        /* where the last sub-block ended (to see the transport jump) */
+    int transport;                          /* the host transport runs */
+    int n_steps;                            /* Tempo grid steps in this sub-block */
+    uint8_t step_off[DRZ_SUB];
+    int64_t step_idx[DRZ_SUB];
+    int bar_start;                          /* a bar starts in this sub-block (Random = Bar) */
+    int64_t step_cur;                       /* the grid step the sub-block starts in */
+    float step_frac;                        /* how far into it, 0..1 */
     float vol_cur;
     float bpm;
 
@@ -170,6 +200,9 @@ typedef struct drz_inst {
     float data[2][DRZ_RING];  /* Live ring = data[0]; Scan: front and back tapes */
     int16_t smp[DRZ_SMP_MAX]; /* M5 */
 #ifdef DRZ_TEST
+    int64_t onset_t[256];    /* output sample of each grain start (tests: timing) */
+    int32_t onset_q[256];    /* its integer read position */
+    int n_onsets;
     uint32_t tag[DRZ_RING];   /* Live: absolute index + 1 of the sample in each slot of data[0] */
 #endif
 } drz_inst_t;
@@ -211,6 +244,18 @@ int grains_active(const drz_inst_t *I);
 int grains_reading(const drz_inst_t *I, int buf); /* playing grains that read data[buf] as a tape */
 void freeze_live_grains(drz_inst_t *I);
 int grains_view(const drz_inst_t *I, char *buf, int cap);
+
+/* mod.c (plan/08) */
+float lfo_wave(int wave, float ph, float sh0, float sh1);
+float lfo_hz(float knob, int sync, float bpm, float mod);
+void mod_matrix(const float *pv, const float *src, float *dst);
+void mod_voice(drz_inst_t *I, voice_t *v, int vi);   /* sources and destinations of a voice, per sub-block */
+void mod_global(drz_inst_t *I, int n);               /* controllers, LFO 2, global destinations */
+int mm_items(const drz_inst_t *I, char *buf, int cap);
+uint32_t seed_hash(uint32_t a, uint32_t b);
+
+/* drizzle.c: beats per Tempo-mode grid step (gr_div) */
+float drz_step_beats(const drz_inst_t *I);
 
 /* scale.c */
 void scale_update(drz_inst_t *I);           /* read the Move set's root and scale (when Scale is in use) */

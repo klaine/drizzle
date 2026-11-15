@@ -71,6 +71,18 @@ class App {
     this.values.set(key, v);
     this.engine?.set(key, v);
     for (const fn of this.controls.get(key) || []) fn(v);
+    if (key === "mm_slot" || key === "mm_clear") this.refresh(["mm_src", "mm_via", "mm_dst", "mm_dep", "mm_slot", "mm_clear"]);
+  }
+
+  /** Read some keys back from the engine (the matrix proxies follow the selected slot). */
+  async refresh(keys) {
+    for (const k of keys) {
+      const s = await this.engine?.get(k);
+      if (s === null || s === undefined) continue;
+      const v = parseFloat(s);
+      this.values.set(k, v);
+      for (const fn of this.controls.get(k) || []) fn(v);
+    }
   }
 
   /** Read every parameter back from the engine (after a patch or state load). */

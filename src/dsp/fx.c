@@ -477,13 +477,14 @@ static void fx_delay(fx_t *f, const float *pv, float bpm, float *l, float *r, in
 static void fx_reverb_run(fx_t *f, const float *pv, float *l, float *r, int n) {
     static const int MOD_RATE[8] = {61, 83, 71, 97, 53, 89, 67, 77}; /* x0.01 Hz */
     static const float difftaps[2][4] = {{142, 107, 379, 277}, {151, 113, 389, 293}};
-    /* Room / Hall / Plate: line-length scale, diffuser gain, wobble depth in samples. */
-    static const float TYPE_SCALE[3] = {0.9f, 1.5f, 1.2f};
-    static const float TYPE_DIFF[3] = {0.6f, 0.6f, 0.75f};
-    static const float TYPE_MOD[3] = {6.0f, 12.0f, 18.0f};
+    /* Room / Hall / Plate / Cloud: line-length scale, diffuser gain, wobble depth in samples. Cloud is a
+     * Hall with twice the wobble, more diffusion and decays up to 60 s (plan/09). */
+    static const float TYPE_SCALE[4] = {0.9f, 1.5f, 1.2f, 1.5f};
+    static const float TYPE_DIFF[4] = {0.6f, 0.6f, 0.75f, 0.7f};
+    static const float TYPE_MOD[4] = {6.0f, 12.0f, 18.0f, 24.0f};
     float sr = DRZ_FS;
     int type = clampi((int)pv[P_REV_TYPE], 0, 3);
-    if (type == REV_TYPE_CLOUD) type = REV_TYPE_HALL; /* Cloud arrives with M3 (plan/09) */
+    int frz = pv[P_REV_FRZ] >= 0.5f; /* Freeze: the tank holds what it has, nothing new goes in */
     float pre = pv[P_REV_PRE] * 0.5f * sr; /* up to half a second, as the Peak's PreDelay (manual p.32) */
     /* ModDepth scales the line wobble (0.5 = the type's own depth), ModRate its speed (manual p.32). */
     float mod = TYPE_MOD[type] * 2.0f * clampf(pv[P_REV_MDEP], 0.0f, 1.0f);
@@ -492,14 +493,15 @@ static void fx_reverb_run(fx_t *f, const float *pv, float *l, float *r, int n) {
     float c_olp = one_pole_coef(exps(pv[P_REV_LPF], 500.0f, 20000.0f), sr);
     float c_ohp = one_pole_coef(exps(pv[P_REV_HPF], 20.0f, 1000.0f), sr);
     float dgain = TYPE_DIFF[type];
-    float t60 = exps(pv[P_REV_DECAY], 0.2f, 20.0f);
+    float t60 = exps(pv[P_REV_DECAY], 0.2f, type == REV_TYPE_CLOUD ? 60.0f : 20.0f);
     float damp = pv[P_REV_DAMP];
-    float dc = one_pole_coef(500.0f + 19500.0f * (1.0f - damp) * (1.0f - damp), sr);
+    float dc = frz ? 1.0f : one_pole_coef(500.0f + 19500.0f * (1.0f - damp) * (1.0f - damp), sr);
+    float in_gain = frz ? 0.0f : 1.0f;
     float hc = one_pole_coef(exps(pv[P_REV_HP], 20.0f, 1000.0f), sr);
     float size_scale = (0.6f + 1.4f * clampf(pv[P_REV_SIZE], 0.0f, 1.0f)) * TYPE_SCALE[type];
     for (int k = 0; k < 8; k++) {
         f->r_len[k] = (int)((float)REVERB_BASE[k] * size_scale);
-        f->r_gain[k] = powf(10.0f, -3.0f * (float)f->r_len[k] / (t60 * sr));
+        f->r_gain[k] = frz ? 1.0f : powf(10.0f, -3.0f * (float)f->r_len[k] / (t60 * sr));
     }
     float mod_pos[8], mod_step[8], mod_inc[8];
     for (int k = 0; k < 8; k++) mod_inc[k] = (float)MOD_RATE[k] * 0.01f * mrate / sr;
@@ -549,7 +551,7 @@ static void fx_reverb_run(fx_t *f, const float *pv, float *l, float *r, int n) {
         mix[0] = a2 + e2; mix[1] = b2 + f2; mix[2] = c3 + g2; mix[3] = d2 + h2;
         mix[4] = a2 - e2; mix[5] = b2 - f2; mix[6] = c3 - g2; mix[7] = d2 - h2;
         for (int k = 0; k < 8; k++)
-            dl_write(&f->r_line[k], mix[k] * 0.35355339f * f->r_gain[k] + xs[k & 1]);
+            dl_write(&f->r_line[k], mix[k] * 0.35355339f * f->r_gain[k] + xs[k & 1] * in_gain);
         float out[2] = {(o[0] + o[2] + o[4] + o[6]) * 0.3f, (o[1] + o[3] + o[5] + o[7]) * 0.3f};
         for (int c = 0; c < 2; c++) {
             f->r_olp[c] += (out[c] - f->r_olp[c]) * c_olp;

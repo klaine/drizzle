@@ -103,11 +103,14 @@ static void spawn_one(drz_inst_t *I, voice_t *v, int vi, int off, int64_t now) {
     const float *pv = I->v, *md = v->dst;
     const buffer_t *b = &I->buf;
     float size_s = map_size_s(pv[P_GR_SIZE] + md[MD_SIZE]) * exp2f(v->flav[3]);
+    if (pv[P_GR_MODE] == GR_MODE_TEMPO) /* Tempo: Size is 1/16..4 grid steps, so the gate follows the tempo */
+        size_s = drz_step_beats(I) * 60.0f / I->bpm * 0.0625f * powf(64.0f, clampf(pv[P_GR_SIZE] + md[MD_SIZE], 0.0f, 1.0f)) *
+                 exp2f(v->flav[3]);
     float len = size_s * DRZ_FS;
     if (len < 32.0f) len = 32.0f;
     if (len > 2.0f * DRZ_FS) len = 2.0f * DRZ_FS;
     float spray = clampf(pv[P_GR_SPRAY] + md[MD_SPRAY], 0.0f, 1.0f);
-    float where = pv[P_GR_POS] + md[MD_POSITION] + v->flav[0] + spray * rng_tri(&I->rng);
+    float where = pv[P_GR_POS] + md[MD_POSITION] + v->flav[0] + spray * rng_tri(&v->vrng);
     float lock = clampf(pv[P_GR_LOCK] + md[MD_LOCK], 0.0f, 1.0f);
     int64_t T = I->clock + off;
 
@@ -126,10 +129,10 @@ static void spawn_one(drz_inst_t *I, voice_t *v, int vi, int off, int64_t now) {
     float base = v->pitch + pv[P_GR_PITCH] + pv[P_GR_FINE] * 0.01f + 24.0f * md[MD_PITCH] + v->flav[2] * 0.01f;
     float semis = base - root;
     float pspr = clampf(pv[P_GR_PSPR] + 24.0f * md[MD_PITCH_SPRAY], 0.0f, 48.0f);
-    if (pspr > 0.0f) semis += quantise(I, (int)pv[P_GR_PQ], base, pspr * rng_bi(&I->rng));
+    if (pspr > 0.0f) semis += quantise(I, (int)pv[P_GR_PQ], base, pspr * rng_bi(&v->vrng));
     float s = clampf(exp2f(semis * (1.0f / 12.0f)), 1.0f / 64.0f, 16.0f); /* |read step| */
     float rp = clampf(pv[P_GR_REV] + md[MD_REVERSE], 0.0f, 1.0f);
-    int rev = rp > 0.0f && rng_uni(&I->rng) < rp;
+    int rev = rp > 0.0f && rng_uni(&v->vrng) < rp;
     double sinc = rev ? -(double)s : (double)s;
     float P = DRZ_FS / semis_to_hz(root); /* the source's period, samples */
 
@@ -244,25 +247,59 @@ static void spawn_one(drz_inst_t *I, voice_t *v, int vi, int off, int64_t now) {
     g->win = (uint8_t)clampi((int)pv[P_GR_WIN], 0, DRZ_WIN_COUNT - 1);
 #ifdef DRZ_TEST
     g->abs = abs_pos;
+    if (I->n_onsets < 256) {
+        I->onset_t[I->n_onsets] = T;
+        I->onset_q[I->n_onsets++] = q;
+    }
 #endif
     /* Overlap gain (plan/03 section 5): incoherent grains add as sqrt(N), locked ones as N; the window
      * normaliser gives every window Hann's loudness. */
-    float overlap = map_dens_hz(pv[P_GR_DENS]) * exp2f(4.0f * md[MD_DENSITY]) * size_s;
+    float rate = pv[P_GR_MODE] == GR_MODE_TEMPO ? I->bpm / (60.0f * drz_step_beats(I)) : map_dens_hz(pv[P_GR_DENS]) * exp2f(4.0f * md[MD_DENSITY]);
+    float overlap = rate * size_s;
     if (overlap < 1.0f) overlap = 1.0f;
     float gain = DRZ_WIN_NORM[g->win] * powf(overlap, -0.5f - 0.5f * lock);
     float lspr = clampf(pv[P_GR_LSPR] + md[MD_LEVEL_SPRAY], 0.0f, 1.0f);
-    if (lspr > 0.0f) gain *= 1.0f - lspr * rng_uni(&I->rng);
+    if (lspr > 0.0f) gain *= 1.0f - lspr * rng_uni(&v->vrng);
     float spread = clampf(pv[P_GR_SPREAD] + md[MD_SPREAD], 0.0f, 1.0f);
-    float pan = clampf(pv[P_V_PAN] + md[MD_PAN] + v->flav[1] + spread * rng_bi(&I->rng), -1.0f, 1.0f);
+    float pan = clampf(pv[P_V_PAN] + md[MD_PAN] + v->flav[1] + spread * rng_bi(&v->vrng), -1.0f, 1.0f);
     float th = (pan + 1.0f) * 0.125f; /* equal power: L = cos, R = sin of (pan + 1) pi / 4 */
     g->gl = gain * sin_cycle(th + 0.25f);
     g->gr = gain * sin_cycle(th);
     v->n_grains++;
 }
 
+/* One onset (plan/06 section 2): Repeats replay the last fresh grain's draws, Probability may drop it. */
+static void onset(drz_inst_t *I, voice_t *v, int vi, int off, int64_t now) {
+    if (v->rpt_left > 0) {
+        v->rpt_left--;
+        v->vrng = v->rep_state;
+    } else {
+        v->rep_state = v->vrng;
+        v->rpt_left = (int)I->v[P_GR_RPT];
+    }
+    float prob = clampf(I->v[P_GR_PROB] + v->dst[MD_PROBABILITY], 0.0f, 1.0f);
+    if (prob < 1.0f && rng_uni(&v->prng) >= prob) {
+        if (v->rpt_left == (int)I->v[P_GR_RPT]) rng_u32(&v->vrng); /* a dropped fresh onset still moves on */
+        return;
+    }
+    spawn_one(I, v, vi, off, now);
+}
+
 void voice_spawn_grains(drz_inst_t *I, voice_t *v, int vi, int n, int64_t now0) {
-    float dens = map_dens_hz(I->v[P_GR_DENS]) * exp2f(4.0f * v->dst[MD_DENSITY]);
     int sounding = v->gate || v->amp.y > 1e-3f;
+    if (I->v[P_GR_MODE] == GR_MODE_TEMPO) {
+        /* one grain per grid step (drizzle.c works out the steps of this sub-block). A new note joins the
+         * grid at the step it falls in if it came within the first quarter of it (a sequenced note sits
+         * a little late), else at the next step. */
+        if (v->last_step == DRZ_STEP_NEW) v->last_step = I->step_cur - (I->step_frac < 0.25f ? 1 : 0);
+        for (int k = 0; k < I->n_steps; k++) {
+            if (I->step_idx[k] <= v->last_step) continue;
+            v->last_step = I->step_idx[k];
+            if (sounding) onset(I, v, vi, I->step_off[k], now0 + I->step_off[k]);
+        }
+        return;
+    }
+    float dens = map_dens_hz(I->v[P_GR_DENS]) * exp2f(4.0f * v->dst[MD_DENSITY]);
     if (!v->gate && I->v[P_GR_RELTH] >= 0.5f) dens *= v->amp.y > 0.02f ? v->amp.y : 0.02f; /* thinning tails */
     if (dens < 0.05f) dens = 0.05f;
     float interval = DRZ_FS / dens;
@@ -270,8 +307,8 @@ void voice_spawn_grains(drz_inst_t *I, voice_t *v, int vi, int n, int64_t now0) 
     while (v->next < (float)n) {
         int off = (int)v->next;
         if (off < 0) off = 0;
-        if (sounding) spawn_one(I, v, vi, off, now0 + off);
-        float u = 1.0f - rng_uni(&I->rng); /* (0, 1] */
+        if (sounding) onset(I, v, vi, off, now0 + off);
+        float u = 1.0f - rng_uni(&v->prng); /* (0, 1] */
         float iv = interval * ((1.0f - j) + j * -logf(u));
         v->next += iv < 1.0f ? 1.0f : iv;
     }

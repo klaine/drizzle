@@ -12,7 +12,7 @@ Rules (plan/10):
     (plan/16 lists them). A Move page appears once its milestone is built (LEVELS, MILESTONE).
 """
 
-MILESTONE = 2  # pages of later milestones are left out of ui_hierarchy
+MILESTONE = 3  # pages of later milestones are left out of ui_hierarchy
 
 # --- enum option lists (append only) -----------------------------------------------------------
 import json as _json
@@ -251,6 +251,15 @@ for _s in range(1, MM_SLOTS + 1):
     P("mm%02d_dst" % _s, "Slot %d Dest" % _s, "Dest", "enum", 0, 0, "None", opts=MOD_DESTS, cp=False)
     P("mm%02d_dep" % _s, "Slot %d Depth" % _s, "Depth", "float", -1, 1, 0.0, cp=False)
 
+# the list page's selector and the Matrix Edit proxies of the selected slot (params.c): never saved
+P("mm_sel", "Matrix Slot Select", "Sel", "int", 0, MM_SLOTS - 1, 0, cp=False, state=False)
+P("mm_slot", "Matrix Slot", "Slot", "int", 1, MM_SLOTS, 1, state=False)
+P("mm_src", "Matrix Source", "Src", "enum", 0, 0, "None", opts=MOD_SOURCES, state=False)
+P("mm_via", "Matrix Via", "Via", "enum", 0, 0, "None", opts=MOD_SOURCES, state=False)
+P("mm_dst", "Matrix Dest", "Dest", "enum", 0, 0, "None", opts=MOD_DESTS, state=False)
+P("mm_dep", "Matrix Depth", "Depth", "float", -1, 1, 0.0, state=False)
+P("mm_clear", "Matrix Clear", "Clear", "enum", 0, 0, "--", opts=["--", "Clear"], state=False)
+
 # --- effects (plan/09; Crest's chain, the distortion renamed Crush) --------------------------------
 P("cr_lvl", "Crush Level", "Level", "float", 0, 1, 0.0)
 P("cr_type", "Crush Type", "Type", "enum", 0, 0, "Soft", opts=CR_TYPES)
@@ -322,6 +331,8 @@ LEVELS = [
     ("lfo1", "LFO 1", ["l1_wave", "l1_rate", "l1_sync", "l1_trig", "l1_pos", "l1_size", "l1_pitch", "l1_cut"], 3),
     ("lfo2", "LFO 2", ["l2_wave", "l2_rate", "l2_sync", "l2_phase", "l2_pos", "l2_dens", "l2_spray", "l2_pan"], 3),
     ("pressure", "Pressure", ["at_pos", "at_dens", "at_spray", "at_size", "at_pitch", "at_cut"], 3),
+    ("matrix", "Mod Matrix", {"items_param": "mm_items", "select_param": "mm_sel", "navigate_to": "matrix_edit"}, 3),
+    ("matrix_edit", "Matrix Edit", ["mm_src", "mm_via", "mm_dst", "mm_dep", "mm_slot", "mm_clear"], 3),
     ("crush", "Crush", ["cr_lvl", "cr_type", "cr_tone", "cr_mix"], 1),
     ("chorus", "Chorus", ["cho_lvl", "cho_type", "cho_rate", "cho_depth", "cho_dly", "cho_fb"], 1),
     ("delay", "Delay", ["dly_lvl", "dly_time", "dly_sync", "dly_fb", "dly_mode", "dly_lp", "dly_hp"], 1),
