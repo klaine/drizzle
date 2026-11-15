@@ -82,7 +82,8 @@ glitch in other tracks, survives a Set reload, and a missing file fails cleanly.
 ## M6 — Release
 - [x] CI (`.github/workflows/build.yml`: build and test on every push, release assets on `v*` tags),
       `release.json` for 0.1.0, README with the feature list.
-- [ ] Schwung catalog entry and release notes: after the device checks, with the owner.
-- [ ] `pages` branch pushed (`scripts/pages.sh --push`): the owner's call, it publishes the site.
+- [ ] Release notes: after the device checks, with the owner. No Schwung catalog entry unless the
+      owner asks for one ([15 §3](15-risks-and-open-questions.md)).
+- [x] `pages` branch pushed (`scripts/pages.sh --push`): the browser synth is published.
 
-**Accept:** v1.0.0 installs through Schwung Manager.
+**Accept:** v1.0.0 installs from its release package.

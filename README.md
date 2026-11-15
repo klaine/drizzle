@@ -6,8 +6,8 @@ sound source: a small wavetable or virtual-analog synth renders into a buffer, a
 becomes a cloud of grains read back from that buffer at the note's pitch. It can also grain your own
 samples.
 
-- **Play it in your browser:** `build/drizzle.html` from a build (the same DSP compiled to WebAssembly,
-  with Web MIDI), or a release's `drizzle.html`
+- **Play it in your browser:** <https://klaine.github.io/drizzle/> (the same DSP compiled to
+  WebAssembly, with Web MIDI)
 - **Download for Move:** the latest release's `drizzle-module.tar.gz`
 - **Every page and knob:** [plan/10-parameter-reference.md](plan/10-parameter-reference.md)
 - **The spec and what is built:** [plan/README.md](plan/README.md) and
@@ -22,7 +22,7 @@ samples.
 Drizzle needs a Move with [Schwung](https://github.com/charlesvestal/schwung) installed.
 
 1. Download `drizzle-module.tar.gz` from the latest release.
-2. Install it with Schwung Manager, or by hand: extract the archive so that it lands at
+2. Install it by uploading it in Schwung Manager, or by hand: extract the archive so that it lands at
    `/data/UserData/schwung/modules/sound_generators/drizzle/` on the Move.
 3. Rescan modules in Schwung Manager, or restart Schwung.
 

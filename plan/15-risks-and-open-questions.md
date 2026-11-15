@@ -39,3 +39,5 @@
 | 2026-11-15 | patch_vol's gain is 4·x² (0.5 = unity): sparse and percussive patches need up to +12 dB to match the bank. |
 | 2026-11-15 | The bank is levelled to INIT by the four loudest 250 ms slices, under a −4 dBFS peak ceiling. |
 | 2026-11-15 | Grain random draws come from per-voice streams, so Random Note and Bar repeat exactly. |
+| 2026-11-15 | The browser synth is published on the `pages` branch (GitHub Pages). |
+| 2026-11-15 | No Schwung catalog entry, ever, unless the owner asks for one explicitly. |

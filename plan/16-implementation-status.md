@@ -64,7 +64,7 @@ Crest's estimate puts the Move's Cortex-A72 at 4–6× slower: the worst case ma
 7. Listen: the checklist of [13 §8](13-testing.md), aliasing of grains far above the root (R3), and
    a run through all 65 patches with their macros.
 
-## Owner's decisions still open
-- Publishing the browser synth (`scripts/pages.sh --push`) and tagging v0.1.0 (CI then attaches the
-  package and `drizzle.html` to the release).
-- A Schwung catalog entry.
+## Owner's decisions
+- The browser synth is published on the `pages` branch (`scripts/pages.sh --push` updates it).
+- Tagging v0.1.0 (CI then attaches the package and `drizzle.html` to the release) is still open.
+- No Schwung catalog entry unless the owner asks for one.
