@@ -6,12 +6,13 @@ in [15 §3](15-risks-and-open-questions.md).
 
 ## M0 — Skeleton & measurements
 - [x] Repo files: `.gitignore`, `LICENSE`, `README.md`, `CLAUDE.md`, `BACKLOG.md`.
-- [ ] `THIRD_PARTY_NOTICES.md` (with the vendored headers and wavetables), `CONTRIBUTING.md`, `release.json`.
-- [ ] Vendor `plugin_api.h`, `move_info.h` from Crest; copy `docs/_schwung_*.md` locally.
-- [ ] Copy and rename Crest's `scripts/` (build, deploy, logs, check_so, pages, build_web, build_single).
-- [ ] `drizzle.c`: pool of 4, init, one Analog saw source at the root written into a Live ring, one
-      grain voice reading it with fixed parameters, FTZ, soft clip, minimal `state`.
-- [ ] ABI and pool tests; `--profile` and the sine benchmark for the device factor.
+- [x] `THIRD_PARTY_NOTICES.md`, `CONTRIBUTING.md`. (`release.json` waits for the first tag.)
+- [x] Vendor `plugin_api.h`, `move_info.h` from Crest. (`docs/_schwung_*.md` are local copies, git-ignored.)
+- [x] Crest's `build.sh`, `deploy.sh`, `logs.sh`, `check_so.py` and contract validator, adapted. The web
+      scripts (`build_web.sh`, `build_single.py`, `pages.sh`) move to M1 with the WASM build.
+- [x] `drizzle.c`: pool of 4, an Analog saw/sine source at the root written into a Live ring, Freeze,
+      8 voices of grains with Position, Spray, Size, Density, Jitter, FTZ, soft clip, `state`.
+- [x] ABI, pool, params, state, guard, pitch, level and freeze tests; `--profile` (`cpu_us`) and the benchmark.
 - [ ] **VERIFY on a Move:** `.bss` of ~26 MB loads; `state` buffer size; CC 69 reaches the slot;
       canvas poll rate; device-to-host speed factor. Record the answers in [15](15-risks-and-open-questions.md).
 

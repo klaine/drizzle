@@ -1,0 +1,37 @@
+{
+  "title": "Drizzle",
+  "children": [
+    {
+      "title": "Overview",
+      "lines": [
+        "Drizzle is a",
+        "granular synth. A",
+        "saw or sine source",
+        "records into a",
+        "buffer; each note",
+        "plays a cloud of",
+        "grains read from it",
+        "at the note's pitch.",
+        "",
+        "This is an early",
+        "test build (M0)."
+      ]
+    },
+    {
+      "title": "Main page",
+      "lines": [
+        "Pos: how far back",
+        "in the buffer.",
+        "Spray: random",
+        "position spread.",
+        "Size: grain length.",
+        "Dens: grains per s.",
+        "Jit: random timing.",
+        "Len: buffer length.",
+        "Frz: freeze the",
+        "buffer (CC 69 too).",
+        "Vol: volume."
+      ]
+    }
+  ]
+}

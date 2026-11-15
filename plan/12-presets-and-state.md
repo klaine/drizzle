@@ -14,8 +14,8 @@ compact default-skipping format as the fallback).
 **What the blob does not hold:** audio. A buffer is always rebuilt from the patch:
 - **Scan:** the tape is re-rendered, and since it depends only on the patch, it is identical
   (synced Source LFO excepted: it follows the tempo at render time).
-- **Live, frozen:** the frozen ring cannot be saved; on load the source renders `buf_len` offline
-  and that is frozen ([05 §3](05-source-buffer.md)). Close, not identical. Factory patches that
+- **Live, frozen:** the frozen ring cannot be saved; on load the ring records `buf_len` of the source
+  again and then freezes ([05 §3](05-source-buffer.md)). Close, not identical. Factory patches that
   start frozen use Scan instead.
 - **Sample:** the file path; the file is loaded again ([04 §5](04-sources.md)).
 

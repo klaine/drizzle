@@ -6,7 +6,8 @@ own sound source: a small wavetable or virtual-analog synth renders into a share
 every note you play becomes a cloud of grains read back from that buffer at the note's pitch.
 Sample playback comes later as a second source.
 
-> **Status:** specification. No code yet; see [plan/16-implementation-status.md](plan/16-implementation-status.md).
+> **Status:** early development (milestone M0: a playable skeleton, not yet tried on a Move). See
+> [plan/16-implementation-status.md](plan/16-implementation-status.md). Build with `scripts/build.sh`.
 
 ## The idea
 

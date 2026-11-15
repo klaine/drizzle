@@ -56,9 +56,9 @@ void render_block(inst, out, frames) {
     ftz_exit(saved);
 }
 ```
-- **Source before voices.** The Live write for this block happens before any grain reads, and
-  grains never read the 128 samples just written (the read guard in [05 §2](05-source-buffer.md)
-  keeps them at least one block behind the head).
+- **Source before voices.** The Live write for this block happens before any grain reads. Grain
+  positions are aligned to the output sample, and the read guard in [05 §2](05-source-buffer.md)
+  keeps every read at or behind that sample's own time.
 - **Latching.** A grain copies its position, size, pitch ratio, window, direction, pan and level at
   onset and keeps them; only the voice's filter, VCA and the global FX move under it. This is
   cheap and is how granular instruments normally behave.
@@ -73,8 +73,7 @@ void render_block(inst, out, frames) {
 #define DRZ_SMP_MAX  (30 * 44100)  // sample storage, samples (M5)
 
 typedef struct {
-    int32_t  idx;  float frac;      // read position: integer + fraction (float alone loses precision past 2^20)
-    float    inc;                   // read step per output sample (signed for reverse)
+    int64_t  pos, dpos;             // read position and step, 32.32 fixed point (float alone loses precision past 2^20)
     uint32_t age, len;              // samples played / total
     float    win_pos, win_inc;      // window phase 0..1
     float    gl, gr;                // pan × level × normalisation, latched

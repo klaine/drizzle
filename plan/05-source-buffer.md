@@ -17,31 +17,41 @@ Scan uses them as front and back: grains read the front while the back renders. 
 `smp`.
 
 ## 2. Live mode
-- **Write.** `source_live` renders 128 samples per block into the ring at `head` (wrapping at
-  `buf_len`, not at `DRZ_BUF_MAX`, so a short buffer loops quickly).
-- **Read guard.** A grain starting at delay `d` behind the head with step `inc` and length `n`
-  must not overtake the head while it plays. At onset Drizzle clamps
-  `d ≥ 128 + 4 + n · max(inc − 1, 0)` and, for reverse grains, `d ≥ 132`, and
-  `d ≤ buf_len − n · max(1 − inc, 0) − 4` so it never reads data older than the ring holds. When
-  both bounds cannot be met (a long grain pitched far up in a short buffer), the grain is shortened.
+- **Write.** `source_live` renders 128 samples per block into the ring at `head`. The ring always
+  wraps at `DRZ_RING` (8 s); `buf_len` only limits how far back grains read, so changing it never
+  scrambles what is recorded. The head is an absolute sample count (int64); a slot is `abs % DRZ_RING`.
+- **Read guard.** Positions are aligned to the output: output sample `i` of a block is absolute
+  `head_after_write − 128 + i`, called *now*. A grain starting `d` samples behind now with step `inc`
+  and length `n` may not overtake the newest written sample, nor fall behind the oldest one still in
+  the ring, while it plays. At onset Drizzle clamps
+  `4 + n · max(inc − 1, 0) ≤ d ≤ L − 136 − n · max(1 − inc, 0)` with `L = min(buf_len, valid)`
+  (the margins cover the 4-point read and the block written ahead). When the bounds cross (a long
+  grain pitched far off in a short buffer), the grain is shortened to `(L − 140) / |inc − 1|`, or
+  skipped below 64 samples. Test builds tag every slot with its absolute position and check every
+  point every grain reads ([13 §2](13-testing.md)).
 - **Filling.** After load, a buffer change or a source-type change, the ring holds less than
   `buf_len` of valid audio; `valid` counts it and the read guard uses `valid` instead of `buf_len`.
   Grains with no valid audio to read are not spawned.
 - **Changing `buf_len`** in Live takes effect at once for new grains; the ring keeps its contents.
+- **Reset** (a state load) sets `valid` to 0 but keeps the head's absolute position, so grains still
+  fading out read what they meant to while new writes land ahead of them.
 
 ## 3. Freeze
-- **Live → frozen.** Writing continues for 256 more samples, which are crossfaded (equal power)
-  into the oldest 256 samples of the ring. The ring then loops without a seam, so grains crossing
-  the old head position do not click. After that the head stops and Position is measured from the
-  frozen head.
-- **Unfreeze** resumes writing at the head. Grains that are playing keep their positions; the read
-  guard applies again to new grains.
+- **Live → frozen.** The loop is the newest `min(buf_len, valid)` samples. The head stops at once;
+  the source runs on for 256 more samples, which are crossfaded (equal power) into the first 256
+  samples of the loop, so its end runs on into its start without a seam. Playing Live grains are
+  converted to loop coordinates, so one that was reading towards the head continues into the loop's
+  start instead of into stale data. Position is then measured back from the frozen head, and grains
+  wrap round the loop freely.
+- **Unfreeze** resumes writing at the head. Grains that are playing keep their loop positions; the
+  read guard applies again to new grains. The first new sample does not continue the frozen loop's
+  last one, so a grain crossing the old head after an unfreeze can click: a listening item for M1.
 - **CC 69** toggles freeze ([01 §6](01-platform-and-abi.md)); the Main page has a knob for it.
 - **State.** A frozen Live buffer cannot be saved, and the blob would be far too large.
-  On load with `buf_freeze` On in Live mode, Drizzle renders `buf_len` of the source offline (as a
-  tape with Sweep and Source LFO in real-time units, and `src_track` treated as Off) and freezes
-  that. The sound is close to what was frozen, not identical; [12 §2](12-presets-and-state.md) notes
-  this for users.
+  On load with `buf_freeze` On in Live mode, the ring starts empty and the freeze waits until the
+  source has recorded `buf_len` again, then freezes that (`wait_full`). There is no offline render,
+  so no CPU spike on load. The sound is close to what was frozen, not identical; [12 §2](12-presets-and-state.md)
+  notes this for users. A freeze asked for while less than 1 024 samples are recorded waits the same way.
 
 ## 4. Scan mode: the tape
 - **Rendering.** The source renders `buf_len` seconds at `src_root` into the back buffer,
