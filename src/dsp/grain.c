@@ -68,37 +68,71 @@ static inline float reflect01(float x) {
     return t <= 1.0f ? t : 2.0f - t;
 }
 
-/* Quantise a pitch-spray offset (semitones) by gr_pq (plan/06 section 4). */
-static float quantise(int mode, float o) {
+/* Quantise a pitch-spray offset by gr_pq (plan/06 section 4). `base` is the note the grain would play
+ * without spray: Scale snaps the sprayed note to the Move set's scale. */
+static float quantise(const drz_inst_t *I, int mode, float base, float o) {
     switch (mode) {
     case GR_PQ_OCT: return 12.0f * roundf(o / 12.0f);
     case GR_PQ_FIFTH: {
         float oct = 12.0f * floorf(o / 12.0f), r = o - oct; /* r in [0, 12): nearest of 0, 7, 12 */
         return oct + (r < 3.5f ? 0.0f : (r < 9.5f ? 7.0f : 12.0f));
     }
-    case GR_PQ_SCALE: return roundf(o); /* chromatic until the Move set's scale is read (M2) */
+    case GR_PQ_SCALE: return scale_quantise(I, base + o) - base;
     default: return o;
     }
 }
 
+/* Period lock (plan/06 section 6): how far to move a grain starting at buffer position `start` so that
+ * its phase matches a steady oscillator's at output time T, read at step `inc` through material of
+ * period P samples. Every grain of a voice then lines up with the others. Result in (-P/2, P/2]. */
+static float lock_shift(double start, double inc, int64_t T, float P) {
+    double target = inc * (double)T, d = fmod(target - start, (double)P);
+    if (d < 0.0) d += (double)P;
+    if (d > 0.5 * (double)P) d -= (double)P;
+    return (float)d;
+}
+
 /* Start one grain of voice vi `off` samples into the sub-block; `now` is that sample's absolute
- * (time-aligned) position in the Live ring. Every grain parameter is latched here. */
+ * (time-aligned) position in the Live ring. Every grain parameter is latched here, with the voice's
+ * modulation (v->dst) and Flavour added. */
 static void spawn_one(drz_inst_t *I, voice_t *v, int vi, int off, int64_t now) {
     if (I->n_free == 0 || v->n_grains >= DRZ_VOICE_GRAINS) { /* skip, never steal (plan/06 section 1) */
         I->grains_skipped++;
         return;
     }
-    const float *pv = I->v;
+    const float *pv = I->v, *md = v->dst;
     const buffer_t *b = &I->buf;
-    float size_s = map_size_s(pv[P_GR_SIZE]);
+    float size_s = map_size_s(pv[P_GR_SIZE] + md[MD_SIZE]) * exp2f(v->flav[3]);
     float len = size_s * DRZ_FS;
     if (len < 32.0f) len = 32.0f;
-    float semis = (float)v->note + 12.0f * pv[P_V_OCT] + I->bend * pv[P_V_BEND] - pv[P_SRC_ROOT] + pv[P_GR_PITCH] +
-                  pv[P_GR_FINE] * 0.01f;
-    if (pv[P_GR_PSPR] > 0.0f) semis += quantise((int)pv[P_GR_PQ], pv[P_GR_PSPR] * rng_bi(&I->rng));
+    if (len > 2.0f * DRZ_FS) len = 2.0f * DRZ_FS;
+    float spray = clampf(pv[P_GR_SPRAY] + md[MD_SPRAY], 0.0f, 1.0f);
+    float where = pv[P_GR_POS] + md[MD_POSITION] + v->flav[0] + spray * rng_tri(&I->rng);
+    float lock = clampf(pv[P_GR_LOCK] + md[MD_LOCK], 0.0f, 1.0f);
+    int64_t T = I->clock + off;
+
+    /* The pitch the material was recorded at: the root, or in Live with Track Notes the pitch stored
+     * with the 16 samples the grain starts on. */
+    float root = pv[P_SRC_ROOT];
+    int live_mode = b->mode == BUF_MODE_LIVE;
+    if (live_mode && pv[P_SRC_TRACK] >= 0.5f) {
+        float leff = (float)buffer_readable(I);
+        float w = where - v->scan_off;
+        w -= floorf(w);
+        int64_t at = b->frozen ? (int64_t)b->ls + (int64_t)((1.0f - w) * (float)b->lf) : now - (int64_t)(4.0f + w * leff);
+        int32_t slot = (int32_t)(((at % DRZ_RING) + DRZ_RING) % DRZ_RING);
+        root += (float)I->track16[slot / DRZ_SUB] * 0.01f;
+    }
+    float base = v->pitch + pv[P_GR_PITCH] + pv[P_GR_FINE] * 0.01f + 24.0f * md[MD_PITCH] + v->flav[2] * 0.01f;
+    float semis = base - root;
+    float pspr = clampf(pv[P_GR_PSPR] + 24.0f * md[MD_PITCH_SPRAY], 0.0f, 48.0f);
+    if (pspr > 0.0f) semis += quantise(I, (int)pv[P_GR_PQ], base, pspr * rng_bi(&I->rng));
     float s = clampf(exp2f(semis * (1.0f / 12.0f)), 1.0f / 64.0f, 16.0f); /* |read step| */
-    int rev = pv[P_GR_REV] > 0.0f && rng_uni(&I->rng) < pv[P_GR_REV];
-    float where = pv[P_GR_POS] + pv[P_GR_SPRAY] * rng_tri(&I->rng);
+    float rp = clampf(pv[P_GR_REV] + md[MD_REVERSE], 0.0f, 1.0f);
+    int rev = rp > 0.0f && rng_uni(&I->rng) < rp;
+    double sinc = rev ? -(double)s : (double)s;
+    float P = DRZ_FS / semis_to_hz(root); /* the source's period, samples */
+
     int32_t q, ls = 0, lf = DRZ_RING;
     float frac = 0.0f;
     int live = 0, bufi = 0;
@@ -122,9 +156,13 @@ static void spawn_one(drz_inst_t *I, voice_t *v, int vi, int off, int64_t now) {
             }
             span = len * s;
         }
-        float x = reflect01(where + v->scan_off);
-        float start = 4.0f + x * ((float)lf - span - 12.0f);
+        float lo = 4.0f, hi = (float)lf - span - 8.0f;
+        float start = lo + reflect01(where + v->scan_off) * (hi - lo);
         if (rev) start += span;
+        if (lock > 0.0f) {
+            start += lock * lock_shift((double)start, sinc, T, P);
+            start = rev ? clampf(start, lo + span, hi + span) : clampf(start, lo, hi);
+        }
         float qi = floorf(start);
         q = (int32_t)qi;
         frac = start - qi;
@@ -153,6 +191,7 @@ static void spawn_one(drz_inst_t *I, voice_t *v, int vi, int off, int64_t now) {
         w -= floorf(w); /* past either end wraps round the ring */
         float d = 4.0f + w * leff;
         if (rev) d -= len * s; /* the same segment, played from its end */
+        if (lock > 0.0f) d -= lock * lock_shift((double)(now - (int64_t)d), sinc, T, P);
         d = clampf(d, lo, hi);
         float di = floorf(d);
         int64_t start = now - (int64_t)di;
@@ -176,6 +215,7 @@ static void spawn_one(drz_inst_t *I, voice_t *v, int vi, int off, int64_t now) {
         float lff = (float)lf;
         float qp = lff * (1.0f - where + v->scan_off);
         if (rev) qp += len * s;
+        if (lock > 0.0f) qp += lock * lock_shift((double)qp, sinc, T, P);
         qp -= lff * floorf(qp / lff);
         float qi = floorf(qp);
         q = (int32_t)qi;
@@ -205,12 +245,15 @@ static void spawn_one(drz_inst_t *I, voice_t *v, int vi, int off, int64_t now) {
 #ifdef DRZ_TEST
     g->abs = abs_pos;
 #endif
-    /* Overlap gain (plan/03 section 5): incoherent grains add as sqrt(N); the window normaliser gives
-     * every window Hann's loudness. */
-    float overlap = map_dens_hz(pv[P_GR_DENS]) * size_s;
-    float gain = DRZ_WIN_NORM[g->win] / sqrtf(overlap > 1.0f ? overlap : 1.0f);
-    if (pv[P_GR_LSPR] > 0.0f) gain *= 1.0f - pv[P_GR_LSPR] * rng_uni(&I->rng);
-    float pan = clampf(pv[P_V_PAN] + pv[P_GR_SPREAD] * rng_bi(&I->rng), -1.0f, 1.0f);
+    /* Overlap gain (plan/03 section 5): incoherent grains add as sqrt(N), locked ones as N; the window
+     * normaliser gives every window Hann's loudness. */
+    float overlap = map_dens_hz(pv[P_GR_DENS]) * exp2f(4.0f * md[MD_DENSITY]) * size_s;
+    if (overlap < 1.0f) overlap = 1.0f;
+    float gain = DRZ_WIN_NORM[g->win] * powf(overlap, -0.5f - 0.5f * lock);
+    float lspr = clampf(pv[P_GR_LSPR] + md[MD_LEVEL_SPRAY], 0.0f, 1.0f);
+    if (lspr > 0.0f) gain *= 1.0f - lspr * rng_uni(&I->rng);
+    float spread = clampf(pv[P_GR_SPREAD] + md[MD_SPREAD], 0.0f, 1.0f);
+    float pan = clampf(pv[P_V_PAN] + md[MD_PAN] + v->flav[1] + spread * rng_bi(&I->rng), -1.0f, 1.0f);
     float th = (pan + 1.0f) * 0.125f; /* equal power: L = cos, R = sin of (pan + 1) pi / 4 */
     g->gl = gain * sin_cycle(th + 0.25f);
     g->gr = gain * sin_cycle(th);
@@ -218,11 +261,12 @@ static void spawn_one(drz_inst_t *I, voice_t *v, int vi, int off, int64_t now) {
 }
 
 void voice_spawn_grains(drz_inst_t *I, voice_t *v, int vi, int n, int64_t now0) {
-    float dens = map_dens_hz(I->v[P_GR_DENS]);
+    float dens = map_dens_hz(I->v[P_GR_DENS]) * exp2f(4.0f * v->dst[MD_DENSITY]);
     int sounding = v->gate || v->amp.y > 1e-3f;
     if (!v->gate && I->v[P_GR_RELTH] >= 0.5f) dens *= v->amp.y > 0.02f ? v->amp.y : 0.02f; /* thinning tails */
+    if (dens < 0.05f) dens = 0.05f;
     float interval = DRZ_FS / dens;
-    float j = I->v[P_GR_JIT];
+    float j = clampf(I->v[P_GR_JIT] + v->dst[MD_JITTER], 0.0f, 1.0f);
     while (v->next < (float)n) {
         int off = (int)v->next;
         if (off < 0) off = 0;

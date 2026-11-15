@@ -84,6 +84,10 @@ if [ "$TEST" = 1 ]; then
 
   echo "== contract"
   "$PY" tests/contract/validate_contract.py
+
+  echo "== golden"
+  "$ZIG" cc -std=c11 -O2 $WARN $MATH -I src/dsp -o "$BUILD/drizzle_golden" $DSP_SRC tests/golden/golden_main.c -lm
+  "$PY" tests/golden/check_golden.py "$BUILD/drizzle_golden"
 fi
 
 if [ "$BENCH" = 1 ]; then
@@ -103,7 +107,7 @@ echo "== dsp.so (aarch64-linux-gnu)"
 # -ffile-prefix-map: no absolute build paths (and so no user name) in shipped binaries.
 "$ZIG" cc -target aarch64-linux-gnu.2.28 -mcpu=cortex_a72 -std=c11 -O2 $WARN $MATH $DEFS \
   -fPIC -shared -fvisibility=hidden -s -ffile-prefix-map="$ROOT"=. -I src/dsp \
-  -o "$MODULE/dsp.so" $DSP_SRC -lm
+  -o "$MODULE/dsp.so" $DSP_SRC -lm -ldl -lrt  # dl, rt: move_info.h (glibc 2.28 keeps them apart)
 rm -f "$MODULE/dsp.so.o"
 
 echo "== check dsp.so"

@@ -40,13 +40,13 @@ in [15 §3](15-risks-and-open-questions.md).
 Move, state round-trips, `cpu_us` ≤ 500 µs with 8 voices and 64 grains.
 
 ## M2 — Wavetables, lock, character
-- [ ] Wavetable source: Amino's tables through `tools/wavegen`, Vintage and Clean, cross-mod.
-- [ ] Period lock; `src_track` in Live with per-bin pitch.
-- [ ] Source LFO; Wavetable pages.
-- [ ] Per-voice filter (stereo SVF from Crest), Mod envelope with direct depths, Env Options.
-- [ ] Voice modes Mono and Legato, glide, Flavour, `v_voices`.
-- [ ] Golden harness with the first references.
-- [ ] Listening pass: if up-transposed grains alias badly, try the half-rate tape mip (R3).
+- [x] Wavetable source: Amino's tables (copied from Amino's `tools/wavegen` output), Vintage and Clean, cross-mod.
+- [x] Period lock; `src_track` in Live with the pitch stored per 16 samples written.
+- [x] Source LFO; Wavetable pages.
+- [x] Per-voice filter (stereo SVF from Crest), Mod envelope with direct depths, Env Options.
+- [x] Voice modes Mono and Legato, glide, Flavour, `v_voices`; pitch quantise Scale from the Move set.
+- [x] Golden harness: every factory patch plus four feature cases (`tests/golden`).
+- [ ] Listening pass: if up-transposed grains alias badly, try the half-rate tape mip (R3). Needs ears.
 
 **Accept:** worst case without FX ≤ 650 µs on the device; listening checklist items 1–4 pass.
 

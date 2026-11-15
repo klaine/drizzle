@@ -12,10 +12,17 @@ Rules (plan/10):
     (plan/16 lists them). A Move page appears once its milestone is built (LEVELS, MILESTONE).
 """
 
-MILESTONE = 1  # pages of later milestones are left out of ui_hierarchy
+MILESTONE = 2  # pages of later milestones are left out of ui_hierarchy
 
 # --- enum option lists (append only) -----------------------------------------------------------
+import json as _json
+import os as _os
+
 OFF_ON = ["Off", "On"]
+# Amino's wavetable names, in bank order (tools/wavegen/manifest.json). The table knobs are indices
+# (two 74-name enums would cost chain_params space); the cards and the web UI name them.
+with open(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "wavegen", "manifest.json")) as _f:
+    TABLE_NAMES = [t["name"] for t in _json.load(_f)["tables"]]
 SRC_TYPES = ["Wavetable", "Analog", "Sample"]
 BUF_MODES = ["Live", "Scan"]
 AN_WAVES = ["Sine", "Tri", "Saw", "Pulse"]
@@ -107,8 +114,7 @@ P("buf_len", "Buffer Length", "Len", "float", 0, 1, 0.75)          # 0.5..8 s ex
 P("buf_freeze", "Freeze", "Frz", "enum", 0, 0, "Off", opts=OFF_ON, viz={"kind": "switch"})
 
 # --- source, common (plan/04 section 1) ---------------------------------------------------------
-# Default Analog until the Wavetable source exists (M2), when INIT moves to Wavetable as plan/12 says.
-P("src_type", "Source", "Src", "enum", 0, 0, "Analog", opts=SRC_TYPES)
+P("src_type", "Source", "Src", "enum", 0, 0, "Wavetable", opts=SRC_TYPES)
 P("src_root", "Source Root", "Root", "int", 24, 96, 48)
 P("src_track", "Track Notes", "Track", "enum", 0, 0, "Off", opts=OFF_ON)
 P("src_fold", "Fold", "Fold", "float", 0, 1, 0.0)
@@ -116,9 +122,9 @@ P("src_tone", "Tone", "Tone", "float", 0, 1, 1.0)
 P("src_seed", "Source Seed", "Seed", "int", 0, 999, 0)
 
 # --- Wavetable source (plan/04 section 2, M2) ---------------------------------------------------
-P("wt_a_table", "Table A", "TblA", "int", 0, 73, 0)
+P("wt_a_table", "Table A", "TblA", "int", 0, len(TABLE_NAMES) - 1, 0)
 P("wt_a_wave", "Wave A", "WavA", "int", 0, 63, 0)
-P("wt_b_table", "Table B", "TblB", "int", 0, 73, 0)
+P("wt_b_table", "Table B", "TblB", "int", 0, len(TABLE_NAMES) - 1, 0)
 P("wt_b_wave", "Wave B", "WavB", "int", 0, 63, 0)
 P("wt_b_semi", "Osc B Semi", "Semi", "int", -24, 24, 0)
 P("wt_b_fine", "Osc B Fine", "Fine", "float", -50, 50, 0.0, unit="ct")
@@ -331,11 +337,12 @@ DISP = {
     "buf_len": ["exp", 0.5, 8, "s"], "gr_size": ["exp", 5, 2000, "ms"], "gr_dens": ["exp", 0.5, 250, "/s"],
     "gr_scan": ["cubic", 4, "x"], "src_root": ["note"], "smp_root": ["note"], "src_tone": ["exp", 150, 20000, "Hz"],
     "sw_time": ["exp", 0.1, 60, "s"], "sl_rate": ["exp", 0.01, 40, "Hz"], "l1_rate": ["exp", 0.01, 40, "Hz"],
-    "l2_rate": ["exp", 0.01, 40, "Hz"], "v_glide": ["exp", 0.001, 2, "s"], "flt_cut": ["exp", 20, 20000, "Hz"],
-    "an_sync": ["exp", 1, 8, "x"], "an_ddet": ["lin", 0, 35, "ct"],
+    "l2_rate": ["exp", 0.01, 40, "Hz"], "v_glide": ["exp", 0.001, 2, "s"], "flt_cut": ["cut"],
+    "an_sync": ["exp", 1, 8, "x"], "wt_a_table": ["table"], "wt_b_table": ["table"], "an_ddet": ["lin", 0, 35, "ct"],
     "cr_tone": ["exp", 1500, 20000, "Hz"], "cho_rate": ["exp", 0.05, 8, "Hz"], "cho_dly": ["lin", 3, 30, "ms"],
     "dly_time": ["exp", 10, 2000, "ms"], "dly_lp": ["exp", 1000, 20000, "Hz"], "dly_hp": ["exp", 20, 2000, "Hz"],
     "rev_decay": ["exp", 0.2, 20, "s"], "rev_hp": ["exp", 20, 1000, "Hz"], "rev_pre": ["lin", 0, 500, "ms"],
+    "flt_env": ["lin", 0, 96, "st"], "flt_vel": ["lin", 0, 48, "st"], "flt_key": ["pct"],
 }
 for _e in ("ae", "me"):
     DISP[_e + "_a"] = ["env", 20, 1]

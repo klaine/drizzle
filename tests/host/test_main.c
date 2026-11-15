@@ -102,6 +102,8 @@ static float zc_hz(const float *x, int n) {
 
 /* A plain Live patch with the effects off: the M0 tests' setting. */
 static void plain_live(void *h) {
+    sp(h, "src_type", "Analog");
+    sp(h, "v_flav", "0");
     sp(h, "buf_mode", "Live");
     sp(h, "rev_lvl", "0");
     sp(h, "sw_timb", "0");
@@ -280,17 +282,17 @@ static void test_source(void) {
         source_prepare(I);
         source_t s;
         source_reset(&s, 1);
-        source_render(&I->sp, &s, rng_uni(&rng), buf, 4096);
+        source_render(&I->sp, &s, rng_uni(&rng), 0.0f, buf, 4096);
         if (!all_finite(buf, 4096)) ok = 0;
         worst = fmaxf(worst, peak(buf, 4096));
     }
     CHECK(ok, "finite for every combination");
     CHECK(worst < 2.5f, "bounded (peak %.2f)", (double)worst);
-    sp(h, "state", "{\"fmt\":\"drizzle\",\"v\":\"1\",\"an_a_wave\":\"Sine\",\"sw_timb\":\"0\"}");
+    sp(h, "state", "{\"fmt\":\"drizzle\",\"v\":\"1\",\"src_type\":\"Analog\",\"an_a_wave\":\"Sine\",\"sw_timb\":\"0\"}");
     source_prepare(I);
     source_t s;
     source_reset(&s, 1);
-    source_render(&I->sp, &s, 0.0f, buf, SEC);
+    source_render(&I->sp, &s, 0.0f, 0.0f, buf, SEC);
     float f = zc_hz(buf, SEC);
     CHECK(fabsf(f - semis_to_hz(48)) < 1.5f, "the sine plays the root: %.1f Hz", (double)f);
     double dc = 0;
@@ -301,7 +303,7 @@ static void test_source(void) {
     sp(h, "an_sync", "0.5");
     source_prepare(I);
     source_reset(&s, 1);
-    source_render(&I->sp, &s, 0.0f, buf, SEC);
+    source_render(&I->sp, &s, 0.0f, 0.0f, buf, SEC);
     double f48 = (double)semis_to_hz(48), fund = goertzel(buf, SEC, f48), off = goertzel(buf, SEC, f48 * 1.5);
     CHECK(fund > 10.0 * off, "a synced saw keeps the master pitch");
     api->destroy_instance(h);
@@ -464,8 +466,12 @@ static void test_guard_fuzz(void) {
         spf(h, "gr_win", (float)(int)(rng_uni(&rng) * 6));
         spf(h, "buf_len", rng_uni(&rng));
         spf(h, "src_root", 24.0f + (float)(int)(72.0f * rng_uni(&rng)));
+        spf(h, "gr_lock", rng_uni(&rng) < 0.5f ? 0.0f : rng_uni(&rng));
+        sp(h, "src_track", rng_uni(&rng) < 0.3f ? "On" : "Off");
+        spf(h, "me_pos", rng_uni(&rng) < 0.5f ? 0.0f : rng_bi(&rng));
+        spf(h, "me_pitch", rng_uni(&rng) < 0.5f ? 0.0f : 24.0f * rng_bi(&rng));
         if (rng_uni(&rng) < 0.15f) sp(h, "buf_freeze", I->v[P_BUF_FREEZE] >= 0.5f ? "0" : "1");
-        if (rng_uni(&rng) < 0.05f) sp(h, "state", "{\"fmt\":\"drizzle\",\"v\":\"1\",\"buf_mode\":\"Live\"}");
+        if (rng_uni(&rng) < 0.05f) sp(h, "state", "{\"fmt\":\"drizzle\",\"v\":\"1\",\"buf_mode\":\"Live\",\"rev_lvl\":\"0\"}");
         int note = 24 + (int)(72 * rng_uni(&rng));
         note_on(h, note, 100);
         render(h, (int)(SEC / 4 + SEC * rng_uni(&rng)) & ~127, L, NULL);
@@ -555,6 +561,7 @@ static void test_scan(void) {
     CHECK(memcmp(I->data[b->front], I2->data[I2->buf.front], sizeof(float) * (size_t)b->tape_len[b->front]) == 0,
           "two instances render the same tape bit for bit");
     /* Position is a timbre axis: a Sweep pitch of +12 puts the start an octave below the end. */
+    sp(h2, "src_type", "Analog");
     sp(h2, "an_a_wave", "Sine");
     sp(h2, "sw_timb", "0");
     sp(h2, "sw_pitch", "12");
@@ -571,7 +578,7 @@ static void test_scan(void) {
     /* re-render while notes play: the render never writes a buffer a grain reads */
     int clash = 0, renders = b->tape_renders;
     for (int k = 0; k < 6; k++) {
-        spf(h, "an_a_shape", 0.15f * (float)(k + 1));
+        spf(h, "wt_a_wave", (float)(8 * (k + 1)));
         for (int i = 0; i < 300; i++) {
             render(h, 128, L, NULL);
             int back = b->front < 0 ? 0 : 1 - b->front;
@@ -592,7 +599,7 @@ static void test_scan(void) {
     /* Freeze holds the tape */
     sp(h, "buf_freeze", "On");
     renders = b->tape_renders;
-    sp(h, "an_a_wave", "Pulse");
+    sp(h, "wt_a_table", "5");
     render(h, 2 * SEC, NULL, NULL);
     CHECK(b->tape_renders == renders, "Freeze holds the tape");
     sp(h, "buf_freeze", "Off");
@@ -635,7 +642,9 @@ static void test_scan_fuzz(void) {
         spf(h, "gr_pspr", 24.0f * rng_uni(&rng));
         spf(h, "gr_scan", 8.0f * rng_uni(&rng) - 4.0f);
         if (rng_uni(&rng) < 0.3f) spf(h, "buf_len", rng_uni(&rng));
-        if (rng_uni(&rng) < 0.3f) spf(h, "an_a_shape", rng_uni(&rng));
+        if (rng_uni(&rng) < 0.3f) spf(h, "wt_a_wave", 63.0f * rng_uni(&rng));
+        if (rng_uni(&rng) < 0.3f) spf(h, "gr_lock", rng_uni(&rng));
+        if (rng_uni(&rng) < 0.2f) sp(h, "v_mode", rng_uni(&rng) < 0.5f ? "Poly" : "Legato");
         int note = 24 + (int)(72 * rng_uni(&rng));
         note_on(h, note, 100);
         render(h, (int)(SEC / 4 + SEC * rng_uni(&rng)) & ~127, L, NULL);
@@ -695,6 +704,200 @@ static void test_fx(void) {
     api->destroy_instance(h);
 }
 
+/* ------------------------------------------------------------------ M2 */
+
+static void test_wavetable(void) {
+    printf("wavetable source\n");
+    void *h = mk();
+    drz_inst_t *I = drz_inst(h);
+    static float buf[SEC];
+    int ok = 1;
+    uint32_t rng = 5;
+    for (int t = 0; t < 80; t++) {
+        spf(h, "wt_a_table", (float)(int)(rng_uni(&rng) * DRZ_WT_TABLES));
+        spf(h, "wt_b_table", (float)(int)(rng_uni(&rng) * DRZ_WT_TABLES));
+        spf(h, "wt_a_wave", 63.0f * rng_uni(&rng));
+        spf(h, "wt_b_lvl", rng_uni(&rng));
+        spf(h, "wt_xmod", (float)(t % 4));
+        spf(h, "wt_xamt", rng_uni(&rng));
+        spf(h, "wt_q", (float)((t / 4) % 2));
+        spf(h, "src_root", 24.0f + 72.0f * rng_uni(&rng));
+        source_prepare(I);
+        source_t s;
+        source_reset(&s, 3);
+        for (int k = 0; k < 4096; k += 16) source_render(&I->sp, &s, rng_uni(&rng), 0.0f, buf + k, 16);
+        if (!all_finite(buf, 4096) || peak(buf, 4096) > 1.6f) ok = 0;
+    }
+    CHECK(ok, "finite and bounded over tables, waves, cross-mods and both qualities");
+    for (int q = 0; q < 2; q++) {
+        sp(h, "state", "{\"fmt\":\"drizzle\",\"v\":\"1\",\"sw_timb\":\"0\"}"); /* table 0, wave 0: a sine */
+        spf(h, "wt_q", (float)q);
+        source_prepare(I);
+        source_t s;
+        source_reset(&s, 3);
+        for (int k = 0; k < SEC; k += 16) source_render(&I->sp, &s, 0.0f, 0.0f, buf + k, 16);
+        float f = zc_hz(buf + 2048, SEC - 2048);
+        CHECK(fabsf(f - semis_to_hz(48)) < 1.5f, "%s: wave 0 of table 0 plays the root (%.1f Hz)", q ? "Clean" : "Vintage",
+              (double)f);
+    }
+    api->destroy_instance(h);
+}
+
+static void test_source_lfo(void) {
+    printf("source LFO\n");
+    void *h = mk(), *h2 = mk();
+    drz_inst_t *I = drz_inst(h), *I2 = drz_inst(h2);
+    const char *st = "{\"fmt\":\"drizzle\",\"v\":\"1\",\"src_type\":\"Analog\",\"an_a_wave\":\"Sine\",\"sw_timb\":\"0\","
+                     "\"sl_pitch\":\"12\",\"sl_wave\":\"Square\",\"sl_rate\":\"0.388\",\"buf_len\":\"1\"}";
+    sp(h, "state", st);
+    sp(h2, "state", st);
+    while (I->buf.tape_renders == 0) render(h, 128, NULL, NULL);
+    while (I2->buf.tape_renders == 0) render(h2, 128, NULL, NULL);
+    const float *t = I->data[I->buf.front];
+    int32_t len = I->buf.tape_len[I->buf.front];
+    CHECK(memcmp(t, I2->data[I2->buf.front], sizeof(float) * (size_t)len) == 0, "an LFO tape is deterministic");
+    /* sl_rate 0.388 = 0.25 Hz: on an 8 s tape, 2 s an octave up, then 2 s an octave down */
+    float hz = 0.01f * powf(4000.0f, 0.388f);
+    int half = (int)(DRZ_FS * 0.5f / hz);
+    if (half > len / 2) half = len / 2;
+    float f0 = zc_hz(t + 1000, half / 2), f1 = zc_hz(t + half + 1000, half / 2);
+    CHECK(f0 > 1.8f * f1 || f1 > 1.8f * f0, "a square Source LFO switches the tape an octave (%.0f / %.0f Hz)", (double)f0,
+          (double)f1);
+    api->destroy_instance(h);
+    api->destroy_instance(h2);
+}
+
+/* Period lock: grains of one voice line up, so a sine cloud stays a clean sine at the note. */
+static void test_lock(void) {
+    printf("period lock\n");
+    void *h = mk();
+    plain_live(h);
+    sp(h, "an_a_wave", "Sine");
+    spf(h, "gr_spray", 0.3f);
+    spf(h, "gr_size", 0.6f);
+    spf(h, "gr_dens", 0.75f);
+    render(h, 4 * SEC, NULL, NULL);
+    double clean[2], lvl[2];
+    for (int k = 0; k < 2; k++) {
+        spf(h, "gr_lock", (float)k);
+        note_on(h, 55, 100);
+        render(h, 4 * SEC, L, NULL);
+        double f = (double)semis_to_hz(55);
+        double on = band(L + SEC, 3 * SEC, f), off = 0;
+        for (int j = 1; j <= 8; j++) off += band(L + SEC, 3 * SEC, f * (1.0 + 0.06 * j));
+        clean[k] = on / (off + 1e-9);
+        lvl[k] = (double)rms(L + SEC, 3 * SEC);
+        note_off(h, 55);
+        render(h, 4 * SEC, NULL, NULL);
+    }
+    CHECK(clean[1] > 10.0 * clean[0], "lock 1 is at least 10 dB cleaner around the note (%.0f vs %.0f)", clean[1], clean[0]);
+    CHECK(fabs(20.0 * log10(lvl[1] / lvl[0])) < 4.0, "lock keeps the level (%.1f dB)", 20.0 * log10(lvl[1] / lvl[0]));
+    api->destroy_instance(h);
+}
+
+static void test_filter(void) {
+    printf("filter\n");
+    void *h = mk();
+    plain_live(h);
+    spf(h, "gr_dens", 0.75f);
+    render(h, 2 * SEC, NULL, NULL);
+    float base;
+    note_on(h, 48, 100);
+    render(h, 2 * SEC, L, NULL);
+    base = rms(L + SEC, SEC);
+    sp(h, "flt_type", "LP24");
+    spf(h, "flt_cut", 0.2f);
+    spf(h, "flt_key", 0.0f);
+    render(h, 2 * SEC, L, NULL);
+    float lp = rms(L + SEC, SEC);
+    CHECK(lp < 0.5f * base, "LP24 at a low cutoff takes the saw's harmonics (%.3f vs %.3f)", (double)lp, (double)base);
+    sp(h, "flt_type", "HP12");
+    spf(h, "flt_cut", 0.95f);
+    render(h, 2 * SEC, L, NULL);
+    CHECK(rms(L + SEC, SEC) < 0.5f * base, "HP12 near the top thins it");
+    sp(h, "flt_type", "BP12");
+    spf(h, "flt_res", 1.0f);
+    spf(h, "flt_drive", 1.0f);
+    spf(h, "flt_env", 1.0f);
+    render(h, 3 * SEC, L, R);
+    CHECK(all_finite(L, 3 * SEC) && all_finite(R, 3 * SEC) && peak(L, 3 * SEC) < 1.0f, "resonant, driven and swept: bounded");
+    api->destroy_instance(h);
+}
+
+static void test_voice_modes(void) {
+    printf("voice modes, glide, flavour, tracking\n");
+    void *h = mk();
+    drz_inst_t *I = drz_inst(h);
+    plain_live(h);
+    render(h, SEC, NULL, NULL);
+    sp(h, "v_mode", "Mono");
+    note_on(h, 48, 100);
+    note_on(h, 52, 100);
+    render(h, 1280, NULL, NULL);
+    int act = 0;
+    for (int v = 0; v < DRZ_VOICES; v++) act += I->voice[v].active && I->voice[v].gate;
+    CHECK(act == 1 && I->voice[0].note == 52, "Mono plays the newest key on one voice");
+    note_off(h, 52);
+    render(h, 128, NULL, NULL);
+    CHECK(I->voice[0].gate && I->voice[0].note == 48, "releasing it returns to the held key");
+    note_off(h, 48);
+    render(h, 4 * SEC, NULL, NULL);
+    sp(h, "v_mode", "Legato");
+    sp(h, "v_glide", "0.7");
+    note_on(h, 48, 100);
+    render(h, SEC, NULL, NULL);
+    int stage = I->voice[0].amp.stage;
+    note_on(h, 60, 100);
+    render(h, 128, NULL, NULL);
+    CHECK(I->voice[0].amp.stage == stage && stage == ES_SUSTAIN, "Legato keeps the envelope running");
+    float p1 = I->voice[0].pitch;
+    CHECK(p1 > 48.5f && p1 < 59.5f, "the pitch glides (%.2f after 3 ms)", (double)p1);
+    render(h, 2 * SEC, NULL, NULL);
+    CHECK(fabsf(I->voice[0].pitch - 60.0f) < 0.05f, "and arrives");
+    note_off(h, 48);
+    note_off(h, 60);
+    render(h, 4 * SEC, NULL, NULL);
+    sp(h, "v_mode", "Poly");
+    sp(h, "v_glide", "0");
+    sp(h, "v_flav", "1");
+    note_on(h, 50, 100);
+    float f1 = I->voice[0].flav[0];
+    note_off(h, 50);
+    render(h, 4 * SEC, NULL, NULL);
+    note_on(h, 50, 100);
+    CHECK(fabsf(I->voice[0].flav[0] - f1) > 1e-6f && fabsf(f1) <= 0.1f, "Flavour differs per note, within 0.1");
+    note_off(h, 50);
+    render(h, 4 * SEC, NULL, NULL);
+    /* Track Notes: the newest key's grains read the source at about its own pitch */
+    sp(h, "v_flav", "0");
+    sp(h, "src_track", "On");
+    spf(h, "gr_spray", 0.0f);
+    spf(h, "gr_pos", 0.02f);
+    note_on(h, 48, 100);
+    render(h, SEC / 2, NULL, NULL);
+    note_on(h, 55, 100);
+    render(h, SEC / 2, NULL, NULL);
+    int vi = I->voice[0].note == 55 ? 0 : 1, near = 0, total = 0;
+    for (int b = 0; b < 344; b++) { /* every grain the newest key starts over a second */
+        render(h, 128, NULL, NULL);
+        for (int k = 0; k < I->n_live; k++) {
+            const grain_t *g = &I->grain[I->live[k]];
+            if (g->voice != vi || g->age > 128) continue;
+            total++;
+            double inc = (double)g->dpos / 4294967296.0;
+            near += fabs(inc - 1.0) < 0.01;
+        }
+    }
+    CHECK(total > 0 && near == total, "new grains of the newest key read at step 1 (%d of %d)", near, total);
+    /* Scale quantise */
+    I->scale_mask = 0x0AB5; /* C major */
+    I->scale_root = 0;
+    CHECK(scale_quantise(I, 61.0f) == 60.0f && scale_quantise(I, 66.0f) == 65.0f && scale_quantise(I, 62.2f) == 62.0f,
+          "Scale snaps to C major");
+    CHECK(I->guard_violations == 0, "guard: %u", I->guard_violations);
+    api->destroy_instance(h);
+}
+
 int main(void) {
     memset(&host, 0, sizeof host);
     host.get_bpm = fake_bpm;
@@ -713,6 +916,11 @@ int main(void) {
     test_scan_fuzz();
     test_pool();
     test_fx();
+    test_wavetable();
+    test_source_lfo();
+    test_lock();
+    test_filter();
+    test_voice_modes();
     printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

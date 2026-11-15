@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 #include "env.h"
+#include "filter.h"
 #include "fx.h"
 #include "params_gen.h"
 #include "plugin_api.h"
@@ -44,18 +45,29 @@ typedef struct {
 
 typedef struct {
     unit_t a[1 + DRZ_DENS_UNISON], b;
-    float yb;           /* last osc B sample, the FM input */
+    float yb;           /* last osc B sample, the FM / cross-mod input */
+    float wpa, wpb;     /* Wavetable phases, in samples of the 128-sample wave */
+    int wa_cur, wb_cur; /* Vintage: the waves playing, changed at the end of a cycle */
     float svf1, svf2;   /* tone filter */
     uint32_t rng;       /* noise */
     float sweep_s;      /* Live: seconds since the sweep started */
+    float lph;          /* Source LFO phase, cycles */
+    float lsh0, lsh1;   /* Source LFO random values: previous and next (S&H, Smooth) */
+    uint32_t lrng;
 } source_t;
 
 /* Source values derived once per block from the patch (source_prepare). */
 typedef struct {
     int type, wa, wb;
     float root, sha, shb, semis_b, lvl_b, dens, ddet, fm, sync_r, noise, fold, tone;
+    /* Wavetable */
+    int ta, tb, wt_xmod, wt_clean;
+    float wta, wtb, wt_semis_b, wt_lvl_b, wt_xamt;
+    /* motion */
     float sw_timb, sw_fold, sw_pitch, sw_tone, sw_curve, sw_time;
     int sw_mode;
+    int sl_wave;
+    float sl_hz, sl_timb, sl_fold, sl_pitch, sl_tone;
 } src_par_t;
 
 /* ------------------------------------------------------------------ buffer (plan/05) */
@@ -101,10 +113,14 @@ typedef struct {
 typedef struct {
     uint8_t active, gate, note, vel;
     uint32_t age;
-    env_t amp;
-    float vel_gain;
-    float next;     /* samples from the current sub-block start to the next onset */
-    float scan_off; /* Scan Speed travel since note-on, in buffer lengths */
+    env_t amp, mod;
+    float vel_gain, mod_vel; /* velocity scaling of the amp level and of the Mod envelope's depths */
+    float pitch, pitch_tgt;  /* the note being played, with glide (MIDI note, fractional) */
+    float flav[4];           /* Flavour offsets drawn at note-on: position, pan, cents, size octaves */
+    float next;              /* samples from the current sub-block start to the next onset */
+    float scan_off;          /* Scan Speed travel since note-on, in buffer lengths */
+    float dst[DRZ_MOD_DST_COUNT]; /* summed modulation per destination this sub-block (MD_*) */
+    filt_t fl, fr;           /* per-voice filter, left and right (plan/07 section 3) */
     int n_grains;
 } voice_t;
 
@@ -128,7 +144,15 @@ typedef struct drz_inst {
     int cc69, sustain_down;
     uint8_t sustained[DRZ_VOICES];
     float bend;                    /* -1..1 */
-    int keys_down;                 /* for the Live sweep restart */
+    int keys_down;                 /* for the Live sweep restart and the Mod envelope's First trigger */
+    uint8_t held[16];              /* keys held, oldest first (Mono and Legato) */
+    int nheld;
+    float last_pitch;              /* where a glide starts */
+    float track_semis;             /* Live with src_track: the source's offset from its root */
+    uint16_t scale_mask;           /* pitch quantise Scale: the Move set's scale (bit 0 = root) */
+    int scale_root;
+    int64_t clock;                 /* output samples so far (period lock's phase reference) */
+    uint32_t frng;                 /* Flavour */
     float vol_cur;
     float bpm;
 
@@ -142,6 +166,7 @@ typedef struct drz_inst {
     /* Everything from here on is not cleared by create_instance: fx_init clears the effect arena
      * incrementally, and `valid` / `tape_len` say what of the buffers may be read. */
     fx_t fx;
+    int16_t track16[DRZ_RING / DRZ_SUB]; /* Live: the source's pitch offset (cents) for each 16 samples written */
     float data[2][DRZ_RING];  /* Live ring = data[0]; Scan: front and back tapes */
     int16_t smp[DRZ_SMP_MAX]; /* M5 */
 #ifdef DRZ_TEST
@@ -162,8 +187,9 @@ float map_scan(float x);      /* -4..4 knob -> speed, cubic */
 /* source.c */
 void source_prepare(drz_inst_t *I);
 void source_reset(source_t *s, uint32_t seed);
-/* Render n samples (n <= DRZ_TAPE_CHUNK) at sweep phase sw (0..1, before the curve), constant over the call. */
-void source_render(const src_par_t *p, source_t *s, float sw, float *out, int n);
+/* Render n samples (n <= DRZ_SUB) at sweep phase sw (0..1, before the curve), constant over the call,
+ * with the source `semis` above or below its root (src_track). Advances the Source LFO. */
+void source_render(const src_par_t *p, source_t *s, float sw, float semis, float *out, int n);
 float sweep_shape(const src_par_t *p, float raw);
 
 /* buffer.c */
@@ -185,6 +211,10 @@ int grains_active(const drz_inst_t *I);
 int grains_reading(const drz_inst_t *I, int buf); /* playing grains that read data[buf] as a tape */
 void freeze_live_grains(drz_inst_t *I);
 int grains_view(const drz_inst_t *I, char *buf, int cap);
+
+/* scale.c */
+void scale_update(drz_inst_t *I);           /* read the Move set's root and scale (when Scale is in use) */
+float scale_quantise(const drz_inst_t *I, float note);
 
 /* drizzle.c */
 DRZ_EXPORT plugin_api_v2_t *move_plugin_init_v2(const host_api_v1_t *host);

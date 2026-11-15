@@ -15,7 +15,7 @@ const char *const DRZ_FACTORY_NAMES[] = {
 
 const float DRZ_FACTORY_VALUES[][P_COUNT] = {
     {  /* Init */
-        0.7f, 1.0f, 0.75f, 0.0f, 1.0f, 48.0f,
+        0.7f, 1.0f, 0.75f, 0.0f, 0.0f, 48.0f,
         0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f,
         0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
         0.0f, 0.0f, 2.0f, 0.0f, 3.0f, 0.5f,

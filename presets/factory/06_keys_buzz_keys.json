@@ -2,8 +2,21 @@
   "name": "Buzz Keys",
   "category": "keys",
   "values": {
-    "buf_mode": "Live", "an_a_wave": "Sine", "an_a_shape": 0.4, "sw_timb": 0, "gr_jit": 0, "gr_dens": 0.9,
-    "gr_size": 0.35, "gr_spray": 0.05, "gr_win": "Perc", "ae_a": 0.2, "ae_d": 0.6, "ae_s": 0.2, "ae_r": 0.45,
-    "rev_lvl": 0.25, "rev_type": "Plate"
+    "src_type": "Analog",
+    "buf_mode": "Live",
+    "an_a_wave": "Sine",
+    "an_a_shape": 0.4,
+    "sw_timb": 0,
+    "gr_jit": 0,
+    "gr_dens": 0.9,
+    "gr_size": 0.35,
+    "gr_spray": 0.05,
+    "gr_win": "Perc",
+    "ae_a": 0.2,
+    "ae_d": 0.6,
+    "ae_s": 0.2,
+    "ae_r": 0.45,
+    "rev_lvl": 0.25,
+    "rev_type": "Plate"
   }
 }

@@ -38,6 +38,8 @@ static drz_inst_t *claim(drz_inst_t *p) {
     p->slot = slot;
     p->rng = 0x9E3779B1u * (uint32_t)(slot + 1) | 1u;
     p->bpm = 120.0f;
+    p->frng = 0x51ED270Bu * (uint32_t)(slot + 1) | 1u;
+    p->scale_mask = 0x0FFF;
     params_defaults(p);
     source_prepare(p);
     buffer_reset(p);
@@ -51,6 +53,7 @@ static void *drz_create_instance(const char *module_dir, const char *json_defaul
     for (int i = 0; i < DRZ_MAX_INSTANCES; i++) {
         drz_inst_t *p = claim(&g_pool[i]);
         if (p) {
+            scale_update(p); /* the first move_info read resolves the export here, not on the audio callback */
             if (json_defaults && json_defaults[0] == '{') params_set(p, "state", json_defaults);
             return p;
         }
@@ -86,7 +89,79 @@ static int voices_sounding(const drz_inst_t *I) {
     return n;
 }
 
+static float glide_time(const drz_inst_t *I) {
+    float x = I->v[P_V_GLIDE];
+    return x > 0.001f ? 0.001f * powf(2000.0f, x) : 0.0f;
+}
+
+/* Start (or restart) voice v on `note`. `legato`: a held mono voice moves to a new key, so its
+ * envelopes, Scan travel and grains carry on and only the pitch moves. */
+static void voice_start(drz_inst_t *I, voice_t *v, int note, int vel, int legato) {
+    int vi = (int)(v - I->voice);
+    float target = (float)note + 12.0f * I->v[P_V_OCT];
+    int glide = glide_time(I) > 0.0f && (I->v[P_V_MODE] != V_MODE_LEGATO || legato);
+    if (!v->active) {
+        v->amp.y = 0.0f;
+        v->amp.stage = ES_IDLE;
+        v->mod.y = 0.0f;
+        v->mod.stage = ES_IDLE;
+        filt_reset(&v->fl);
+        filt_reset(&v->fr);
+    } else if (v->note != note && !legato) {
+        voice_kill_grains(I, vi); /* a stolen or retaken voice's grains fade in 64 samples */
+    }
+    v->pitch_tgt = target;
+    v->pitch = glide && I->last_pitch > 0.0f ? I->last_pitch : target;
+    I->last_pitch = target;
+    v->note = (uint8_t)note;
+    v->vel = (uint8_t)vel;
+    v->gate = 1;
+    v->active = 1;
+    v->age = ++I->age_ctr;
+    float vn = (float)vel * (1.0f / 127.0f);
+    v->vel_gain = 1.0f - I->v[P_AE_VEL] * (1.0f - vn * vn);
+    v->mod_vel = 1.0f - I->v[P_ME_VEL] * (1.0f - vn);
+    if (legato) return;
+    v->next = 0.0f; /* the first grain starts at note-on */
+    v->scan_off = 0.0f;
+    float f = I->v[P_V_FLAV]; /* Flavour: small per-note offsets (plan/07 section 1) */
+    v->flav[0] = 0.1f * f * rng_bi(&I->frng);
+    v->flav[1] = 0.5f * f * rng_bi(&I->frng);
+    v->flav[2] = 15.0f * f * rng_bi(&I->frng);
+    v->flav[3] = 0.5f * f * rng_bi(&I->frng);
+    env_trigger(&v->amp, 0);
+    if (I->v[P_ME_TRIG] != ME_TRIG_FIRST || I->keys_down <= 1 || v->mod.stage == ES_IDLE) env_trigger(&v->mod, 0);
+}
+
+static void release_voice(drz_inst_t *I, voice_t *v) {
+    (void)I;
+    v->gate = 0;
+    env_release(&v->amp);
+    env_release(&v->mod);
+}
+
+static void held_remove(drz_inst_t *I, int note) {
+    int o = 0;
+    for (int i = 0; i < I->nheld; i++)
+        if (I->held[i] != note) I->held[o++] = I->held[i];
+    I->nheld = o;
+}
+
 static void note_on(drz_inst_t *I, int note, int vel) {
+    if (I->keys_down == 0) I->src_live.sweep_s = 0.0f; /* the Live sweep restarts with a new phrase */
+    held_remove(I, note);
+    if (I->nheld == (int)sizeof I->held) held_remove(I, I->held[0]);
+    I->held[I->nheld++] = (uint8_t)note;
+    I->keys_down++;
+    int mode = (int)I->v[P_V_MODE];
+    if (mode != V_MODE_POLY) { /* Mono / Legato: one voice, the newest key */
+        voice_t *v = &I->voice[0];
+        for (int i = 1; i < DRZ_VOICES; i++)
+            if (I->voice[i].active) release_voice(I, &I->voice[i]);
+        voice_start(I, v, note, vel, mode == V_MODE_LEGATO && v->active && v->gate);
+        I->sustained[0] = 0;
+        return;
+    }
     int limit = clampi((int)I->v[P_V_VOICES], 1, DRZ_VOICES);
     voice_t *pick = NULL;
     for (int i = 0; i < DRZ_VOICES && !pick; i++) /* the same key again: reuse its voice */
@@ -104,34 +179,24 @@ static void note_on(drz_inst_t *I, int note, int vel) {
                 if (I->voice[i].active && (!pick || I->voice[i].age < pick->age)) pick = &I->voice[i];
     }
     if (!pick) return;
-    int vi = (int)(pick - I->voice);
-    if (pick->active && pick->note != note) voice_kill_grains(I, vi); /* a stolen voice's grains fade in 64 samples */
-    if (!pick->active) {
-        pick->amp.y = 0.0f;
-        pick->amp.stage = ES_IDLE;
-    }
-    if (I->keys_down == 0) I->src_live.sweep_s = 0.0f; /* the Live sweep restarts with a new phrase */
-    I->keys_down++;
-    pick->active = 1;
-    pick->gate = 1;
-    pick->note = (uint8_t)note;
-    pick->vel = (uint8_t)vel;
-    float vn = (float)vel * (1.0f / 127.0f);
-    pick->vel_gain = 1.0f - I->v[P_AE_VEL] * (1.0f - vn * vn);
-    pick->age = ++I->age_ctr;
-    pick->next = 0.0f; /* the first grain starts at note-on */
-    pick->scan_off = 0.0f;
-    env_trigger(&pick->amp, 0);
-    I->sustained[vi] = 0;
-}
-
-static void release_voice(drz_inst_t *I, voice_t *v) {
-    v->gate = 0;
-    env_release(&v->amp);
-    if (I->keys_down > 0) I->keys_down--;
+    voice_start(I, pick, note, vel, 0);
+    I->sustained[pick - I->voice] = 0;
 }
 
 static void note_off(drz_inst_t *I, int note) {
+    held_remove(I, note);
+    if (I->keys_down > 0) I->keys_down--;
+    if (I->v[P_V_MODE] != V_MODE_POLY) {
+        voice_t *v = &I->voice[0];
+        if (!v->active || !v->gate || v->note != note) return;
+        if (I->nheld > 0) { /* back to the newest key still held, legato */
+            voice_start(I, v, I->held[I->nheld - 1], v->vel, 1);
+            return;
+        }
+        if (I->sustain_down) I->sustained[0] = 1;
+        else release_voice(I, v);
+        return;
+    }
     for (int i = 0; i < DRZ_VOICES; i++) {
         voice_t *v = &I->voice[i];
         if (v->active && v->gate && v->note == note) {
@@ -148,11 +213,53 @@ void voices_all_off(drz_inst_t *I, int hard) {
         if (v->gate) release_voice(I, v);
         if (hard) {
             voice_kill_grains(I, i);
-            v->amp.y = 0.0f;
-            v->amp.stage = ES_IDLE;
+            v->amp.y = v->mod.y = 0.0f;
+            v->amp.stage = v->mod.stage = ES_IDLE;
         }
     }
     I->keys_down = 0;
+    I->nheld = 0;
+}
+
+/* Per sub-block: glide, the Mod envelope and its direct depths into dst[] (M3 adds LFOs, pressure and
+ * the matrix to the same sums), and the filter's coefficients. */
+static void voice_control(drz_inst_t *I, voice_t *v, const env_par_t *ap, const env_par_t *mp, float glide_c) {
+    const float *pv = I->v;
+    env_tick(&v->amp, ap);
+    float me = env_tick(&v->mod, mp) * v->mod_vel;
+    v->pitch = v->pitch_tgt + (v->pitch - v->pitch_tgt) * glide_c;
+    float *d = v->dst;
+    memset(d, 0, sizeof v->dst);
+    d[MD_POSITION] = pv[P_ME_POS] * me;
+    d[MD_SIZE] = pv[P_ME_SIZE] * me;
+    d[MD_DENSITY] = pv[P_ME_DENS] * me;
+    d[MD_PITCH] = pv[P_ME_PITCH] * me * (1.0f / 24.0f);
+    d[MD_CUTOFF] = pv[P_FLT_ENV] * me;
+}
+
+/* The voice's filter over one sub-block of its grains (plan/07 section 3). */
+static void voice_filter(drz_inst_t *I, voice_t *v, float *l, float *r, int n) {
+    static const int MAP[] = {-1, FLT_LP24, FLT_LP12, FLT_BP12, FLT_HP12};
+    int type = clampi((int)I->v[P_FLT_TYPE], 0, 4);
+    if (type == FLT_TYPE_OFF) return;
+    const float *pv = I->v;
+    float note = 20.0f + 115.0f * clampf(pv[P_FLT_CUT], 0.0f, 1.0f) + 96.0f * v->dst[MD_CUTOFF] +
+                 pv[P_FLT_KEY] * (v->pitch - 60.0f) + pv[P_FLT_VEL] * 48.0f * (float)v->vel * (1.0f / 127.0f);
+    float hz = fminf(semis_to_hz(clampf(note, 0.0f, 140.0f)), 0.45f * DRZ_FS);
+    float g = tanf(DRZ_PI * hz / DRZ_FS);
+    float res = clampf(pv[P_FLT_RES] + v->dst[MD_RESONANCE], 0.0f, 1.0f);
+    float drive = clampf(pv[P_FLT_DRIVE] + v->dst[MD_FILTER_DRIVE], 0.0f, 1.0f);
+    float k = filt_res_to_k(res), gin = (1.0f + 0.5f * res) * (1.0f + 2.0f * drive), gout = 1.0f / (1.0f + drive);
+    for (int i = 0; i < n; i++) {
+        l[i] *= gin;
+        r[i] *= gin;
+    }
+    filt_process(&v->fl, MAP[type], l, n, g, g, k, 0.3f + 2.0f * drive, &I->rng, NULL);
+    filt_process(&v->fr, MAP[type], r, n, g, g, k, 0.3f + 2.0f * drive, &I->rng, NULL);
+    for (int i = 0; i < n; i++) {
+        l[i] *= gout;
+        r[i] *= gout;
+    }
 }
 
 /* ------------------------------------------------------------------ MIDI (plan/01 section 6) */
@@ -179,7 +286,7 @@ static void drz_on_midi(void *instance, const uint8_t *msg, int len, int source)
                 for (int i = 0; i < DRZ_VOICES; i++)
                     if (I->sustained[i]) {
                         I->sustained[i] = 0;
-                        release_voice(I, &I->voice[i]);
+                        if (I->voice[i].gate) release_voice(I, &I->voice[i]);
                     }
             break;
         case 69: { /* Freeze: a rising edge toggles it (plan/05 section 3) */
@@ -248,7 +355,18 @@ static void drz_render_block(void *instance, int16_t *out, int frames) {
         I->bpm = bpm > 20.0f && bpm < 400.0f ? bpm : 120.0f;
     }
     env_par_t ep = {I->v[P_AE_A], I->v[P_AE_D], I->v[P_AE_S], I->v[P_AE_R]};
+    env_par_t mp = {I->v[P_ME_A], I->v[P_ME_D], I->v[P_ME_S], I->v[P_ME_R]};
+    float gt = glide_time(I), glide_c = gt > 0.0f ? expf(-DRZ_CTL_DT * 3.0f / gt) : 0.0f;
     float scan = map_scan(I->v[P_GR_SCAN]);
+    if ((int)I->v[P_GR_PQ] == GR_PQ_SCALE) scale_update(I);
+    /* Track Notes (Live): the source plays the newest held key, gliding with the voices */
+    if (I->v[P_SRC_TRACK] >= 0.5f && I->nheld > 0) {
+        float tgt = (float)I->held[I->nheld - 1] + 12.0f * I->v[P_V_OCT] - I->v[P_SRC_ROOT];
+        float c = gt > 0.0f ? expf(-(float)frames / DRZ_FS * 3.0f / gt) : 0.0f;
+        I->track_semis = tgt + (I->track_semis - tgt) * c;
+    } else if (I->v[P_SRC_TRACK] < 0.5f) {
+        I->track_semis = 0.0f;
+    }
     float vl[DRZ_VOICES][DRZ_SUB], vr[DRZ_VOICES][DRZ_SUB];
 
     for (int done = 0; done < frames;) {
@@ -270,14 +388,16 @@ static void drz_render_block(void *instance, int16_t *out, int frames) {
                 voice_t *v = &I->voice[vi];
                 env0[vi] = v->amp.y;
                 if (!v->active) continue;
-                env_tick(&v->amp, &ep);
+                voice_control(I, v, &ep, &mp, glide_c);
                 if (readable > 0) v->scan_off += scan * (float)n / (float)readable;
                 voice_spawn_grains(I, v, vi, n, base + sb);
             }
             grains_render(I, vl, vr, n, base + sb);
+            I->clock += n;
             for (int vi = 0; vi < DRZ_VOICES; vi++) {
                 voice_t *v = &I->voice[vi];
                 if (!v->active) continue;
+                voice_filter(I, v, vl[vi], vr[vi], n);
                 float k = VOICE_GAIN * v->vel_gain;
                 float g = env0[vi] * k, dg = (v->amp.y - env0[vi]) * k / (float)n;
                 for (int i = 0; i < n; i++, g += dg) {
@@ -293,6 +413,10 @@ static void drz_render_block(void *instance, int16_t *out, int frames) {
             memset(I->busl, 0, (size_t)cnt * sizeof(float));
             memset(I->busr, 0, (size_t)cnt * sizeof(float));
             grains_kill_all(I);
+            for (int vi = 0; vi < DRZ_VOICES; vi++) {
+                filt_reset(&I->voice[vi].fl);
+                filt_reset(&I->voice[vi].fr);
+            }
             fx_reset(&I->fx);
             source_reset(&I->src_live, (uint32_t)I->v[P_SRC_SEED]);
             I->nan_resets++;

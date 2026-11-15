@@ -68,5 +68,38 @@ int main(void) {
     sp(h, "buf_len", "1");
     run("8 notes, pool full (128 grains)", h, 8, 40);
     run("8 notes, pool full, pitched up", h, 8, 60);
+    /* the worst case of plan/03 section 7: full pool, stereo LP24 on every voice, every effect, a
+     * period-locked cloud, and a Scan tape re-rendering all the time */
+    sp(h, "flt_type", "LP24");
+    sp(h, "flt_res", "0.6");
+    sp(h, "flt_drive", "0.5");
+    sp(h, "cr_lvl", "0.3");
+    sp(h, "cho_lvl", "0.5");
+    sp(h, "dly_lvl", "0.5");
+    sp(h, "rev_lvl", "0.5");
+    sp(h, "gr_lock", "1");
+    run("worst: pool full, LP24, all FX, lock", h, 8, 40);
+    sp(h, "buf_mode", "Scan");
+    sp(h, "src_type", "Wavetable");
+    static int16_t out[256];
+    for (int i = 0; i < 2000; i++) api->render_block(h, out, 128);
+    note_on(h, 40); note_on(h, 45); note_on(h, 50); note_on(h, 55);
+    note_on(h, 60); note_on(h, 65); note_on(h, 70); note_on(h, 75);
+    {   /* re-render the tape continuously: change a source knob, then time the render blocks */
+        static double t[N];
+        int k = 0;
+        for (int i = 0; i < 40 && k < N; i++) {
+            char w[16];
+            snprintf(w, sizeof w, "%d", i % 64);
+            sp(h, "wt_a_wave", w);
+            for (int b = 0; b < 300 && k < N; b++) {
+                double a = now_us();
+                api->render_block(h, out, 128);
+                t[k++] = now_us() - a;
+            }
+        }
+        qsort(t, (size_t)k, sizeof t[0], cmp);
+        printf("%-38s p99 %6.1f us   max %6.1f us\n", "worst + tape re-render (Scan)", t[k * 99 / 100], t[k - 1]);
+    }
     return 0;
 }

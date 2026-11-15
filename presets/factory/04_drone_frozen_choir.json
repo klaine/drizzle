@@ -2,8 +2,24 @@
   "name": "Frozen Choir",
   "category": "drone",
   "values": {
-    "an_a_wave": "Tri", "an_dens": 0.6, "an_ddet": 0.5, "an_b_lvl": 0.5, "an_b_semi": 7, "sw_timb": 0.5,
-    "buf_len": 0.9, "gr_size": 0.85, "gr_spray": 0.1, "gr_scan": 0.8, "gr_pspr": 12, "gr_spread": 1,
-    "rev_lvl": 0.6, "rev_type": "Cloud", "rev_decay": 0.9, "rev_size": 0.95, "ae_a": 0.8, "ae_r": 0.8
+    "src_type": "Analog",
+    "an_a_wave": "Tri",
+    "an_dens": 0.6,
+    "an_ddet": 0.5,
+    "an_b_lvl": 0.5,
+    "an_b_semi": 7,
+    "sw_timb": 0.5,
+    "buf_len": 0.9,
+    "gr_size": 0.85,
+    "gr_spray": 0.1,
+    "gr_scan": 0.8,
+    "gr_pspr": 12,
+    "gr_spread": 1,
+    "rev_lvl": 0.6,
+    "rev_type": "Cloud",
+    "rev_decay": 0.9,
+    "rev_size": 0.95,
+    "ae_a": 0.8,
+    "ae_r": 0.8
   }
 }

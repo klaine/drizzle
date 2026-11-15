@@ -1,6 +1,7 @@
-/* The shared source (plan/04): the Analog type (Crest's band-limited waves, 2-point polyBLEP) with
- * density, FM, sync and noise, then fold and tone, moved by the Sweep. The Wavetable type arrives
- * with M2 and Sample with M5; until then both render the Analog source. */
+/* The shared source (plan/04): the Wavetable type (Amino's 8-bit tables, Vintage or Clean, with
+ * cross-mod) or the Analog type (Crest's band-limited waves, 2-point polyBLEP, with density, FM, sync
+ * and noise), then fold and tone, moved by the Sweep and the Source LFO. Sample (M5) renders nothing
+ * here: its buffer is the file. */
 #include <math.h>
 #include <string.h>
 
@@ -126,6 +127,10 @@ void source_reset(source_t *s, uint32_t seed) {
     for (int k = 0; k <= DRZ_DENS_UNISON; k++) s->a[k].tm = s->a[k].ts = SPREAD[k];
     s->rng = 0x2545F491u ^ (seed * 0x9E3779B1u);
     if (!s->rng) s->rng = 1;
+    s->lrng = s->rng ^ 0x68E31DA4u;
+    if (!s->lrng) s->lrng = 1;
+    s->lsh0 = rng_bi(&s->lrng);
+    s->lsh1 = rng_bi(&s->lrng);
 }
 
 void source_prepare(drz_inst_t *I) {
@@ -153,6 +158,109 @@ void source_prepare(drz_inst_t *I) {
     p->sw_curve = v[P_SW_CURVE];
     p->sw_mode = (int)v[P_SW_MODE];
     p->sw_time = 0.1f * powf(600.0f, v[P_SW_TIME]);
+    p->ta = clampi((int)v[P_WT_A_TABLE], 0, DRZ_WT_TABLES - 1);
+    p->tb = clampi((int)v[P_WT_B_TABLE], 0, DRZ_WT_TABLES - 1);
+    p->wta = v[P_WT_A_WAVE];
+    p->wtb = v[P_WT_B_WAVE];
+    p->wt_semis_b = v[P_WT_B_SEMI] + v[P_WT_B_FINE] * 0.01f;
+    p->wt_lvl_b = v[P_WT_B_LVL];
+    p->wt_xmod = (int)v[P_WT_XMOD];
+    p->wt_xamt = v[P_WT_XAMT];
+    p->wt_clean = (int)v[P_WT_Q] == WT_Q_CLEAN;
+    /* Source LFO: free rate 0.01..40 Hz, or a tempo division (beats per cycle) */
+    static const float SL_BEATS[] = {0.0f, 0.25f, 1.0f / 3.0f, 0.5f, 2.0f / 3.0f, 1.0f, 1.5f, 2.0f, 4.0f, 8.0f, 16.0f, 32.0f};
+    int sync = clampi((int)v[P_SL_SYNC], 0, 11);
+    p->sl_hz = sync ? I->bpm / (60.0f * SL_BEATS[sync]) : 0.01f * powf(4000.0f, v[P_SL_RATE]);
+    p->sl_wave = (int)v[P_SL_WAVE];
+    p->sl_timb = v[P_SL_TIMB];
+    p->sl_fold = v[P_SL_FOLD];
+    p->sl_pitch = v[P_SL_PITCH];
+    p->sl_tone = v[P_SL_TONE];
+}
+
+/* The Source LFO's value now (-1..1), then advance it by n samples. */
+static float slfo_tick(const src_par_t *p, source_t *s, int n) {
+    float t = s->lph, y;
+    switch (p->sl_wave) {
+    case SL_WAVE_TRI: y = t < 0.5f ? 4.0f * t - 1.0f : 3.0f - 4.0f * t; break;
+    case SL_WAVE_SAW: y = 2.0f * t - 1.0f; break;
+    case SL_WAVE_SQUARE: y = t < 0.5f ? 1.0f : -1.0f; break;
+    case SL_WAVE_S_H: y = s->lsh1; break;
+    case SL_WAVE_SMOOTH: y = s->lsh0 + (s->lsh1 - s->lsh0) * (0.5f - 0.5f * sin_cycle(t * 0.5f + 0.25f)); break;
+    default: y = sin_cycle(t); break;
+    }
+    s->lph += p->sl_hz * (float)n / DRZ_FS;
+    if (s->lph >= 1.0f) {
+        s->lph -= floorf(s->lph);
+        s->lsh0 = s->lsh1;
+        s->lsh1 = rng_bi(&s->lrng);
+    }
+    return y;
+}
+
+/* ------------------------------------------------------------------ Wavetable (plan/04 section 2) */
+
+/* Vintage: 4x oversampled, no interpolation; the wave changes at the end of a cycle (Amino's stepping).
+ * Clean: linear interpolation, and a fractional wave position crossfades the two nearest waves. */
+static inline float wt_osc(const int8_t (*tab)[128], float *ph, int *cur, float wave, float dt, int clean, float pm) {
+    float y;
+    if (clean) {
+        int w0 = (int)wave;
+        float wf = wave - (float)w0;
+        int w1 = w0 < 63 ? w0 + 1 : 63;
+        float q = *ph + pm * 128.0f;
+        q -= 128.0f * floorf(q * (1.0f / 128.0f));
+        int j = (int)q;
+        if (j > 127) j = 127;
+        float fr = q - (float)j;
+        int j1 = (j + 1) & 127;
+        float a = (float)tab[w0][j] + ((float)tab[w0][j1] - (float)tab[w0][j]) * fr;
+        float b = (float)tab[w1][j] + ((float)tab[w1][j1] - (float)tab[w1][j]) * fr;
+        y = a + (b - a) * wf;
+        *ph += dt;
+        if (*ph >= 128.0f) *ph -= 128.0f;
+    } else {
+        float acc = 0.0f, d4 = 0.25f * dt;
+        for (int k = 0; k < 4; k++) {
+            float q = *ph + pm * 128.0f;
+            q -= 128.0f * floorf(q * (1.0f / 128.0f));
+            int j = (int)q;
+            acc += (float)tab[*cur][j > 127 ? 127 : j];
+            *ph += d4;
+            if (*ph >= 128.0f) {
+                *ph -= 128.0f;
+                *cur = clampi((int)(wave + 0.5f), 0, 63);
+            }
+        }
+        y = 0.25f * acc;
+    }
+    return y * (1.0f / 128.0f);
+}
+
+static void render_wavetable(const src_par_t *p, source_t *s, float timb, float pitch, float *out, int n) {
+    float wa = clampf(p->wta + 63.0f * timb, 0.0f, 63.0f), wb = clampf(p->wtb + 63.0f * timb, 0.0f, 63.0f);
+    float dta = clampf(semis_to_hz(pitch) * 128.0f / DRZ_FS, 0.0f, 60.0f);
+    float dtb = clampf(semis_to_hz(pitch + p->wt_semis_b) * 128.0f / DRZ_FS, 0.0f, 60.0f);
+    const int8_t (*ta)[128] = DRZ_WAVETABLES[p->ta], (*tb)[128] = DRZ_WAVETABLES[p->tb];
+    int xm = p->wt_xmod;
+    float xa = p->wt_xamt;
+    int use_b = p->wt_lvl_b > 0.0005f || (xm != WT_XMOD_OFF && (xa > 0.0005f || xm == WT_XMOD_SYNC));
+    float bmix = 1.0f / (1.0f + p->wt_lvl_b);
+    for (int i = 0; i < n; i++) {
+        float yb = 0.0f;
+        int wrapped = 0;
+        if (use_b) {
+            float before = s->wpb;
+            yb = wt_osc(tb, &s->wpb, &s->wb_cur, wb, dtb, p->wt_clean, 0.0f);
+            wrapped = s->wpb < before;
+        }
+        float pm = xm == WT_XMOD_PM ? 1.5f * xa * xa * s->yb : 0.0f;
+        if (xm == WT_XMOD_SYNC && wrapped) s->wpa = s->wpb * dta / (dtb > 1e-6f ? dtb : 1e-6f); /* hard sync to B */
+        s->yb = yb;
+        float ya = wt_osc(ta, &s->wpa, &s->wa_cur, wa, dta, p->wt_clean, pm);
+        if (xm == WT_XMOD_RING) ya += (ya * yb - ya) * xa;
+        out[i] = (ya + p->wt_lvl_b * yb) * bmix;
+    }
 }
 
 /* Sweep curve: c > 0 bends towards exponential (slow start), c < 0 towards logarithmic. */
@@ -169,12 +277,7 @@ static inline float fold(float x, float amt) {
     return amt < 0.1f ? x + (y - x) * amt * 10.0f : y;
 }
 
-void source_render(const src_par_t *p, source_t *s, float sw, float *out, int n) {
-    float sv = sweep_shape(p, sw);
-    float sha = clampf(p->sha + p->sw_timb * sv, 0.0f, 1.0f), shb = clampf(p->shb + p->sw_timb * sv, 0.0f, 1.0f);
-    float fo = clampf(p->fold + p->sw_fold * sv, 0.0f, 1.0f);
-    float tone = clampf(p->tone + p->sw_tone * sv, 0.0f, 1.0f);
-    float pitch = p->root + p->sw_pitch * sv;
+static void render_analog(const src_par_t *p, source_t *s, float sha, float shb, float pitch, float *out, int n) {
     float dta = clampf(semis_to_hz(pitch) / DRZ_FS, 0.0f, 0.45f);
     float dtb = clampf(semis_to_hz(pitch + p->semis_b) / DRZ_FS, 0.0f, 0.45f);
     int ncopy = p->dens > 0.001f ? DRZ_DENS_UNISON : 0;
@@ -184,17 +287,6 @@ void source_render(const src_par_t *p, source_t *s, float sw, float *out, int n)
     float gcopy = p->dens, norm = 1.0f / sqrtf(1.0f + (float)ncopy * p->dens * p->dens);
     int use_b = p->lvl_b > 0.0005f || p->fm > 0.0005f;
     float bmix = 1.0f / (1.0f + p->lvl_b);
-    /* tone: a 12 dB state-variable low-pass (TPT), bypassed when open */
-    int tone_on = tone < 0.999f;
-    float g = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
-    if (tone_on) {
-        float fc = 150.0f * powf(20000.0f / 150.0f, tone);
-        g = tanf(DRZ_PI * fminf(fc, 0.45f * DRZ_FS) / DRZ_FS);
-        const float k = 1.41421356f;
-        a1 = 1.0f / (1.0f + g * (g + k));
-        a2 = g * a1;
-        a3 = g * a2;
-    }
     for (int i = 0; i < n; i++) {
         float yb = 0.0f;
         if (use_b) yb = unit_tick(&s->b, p->wb, shb, dtb, 1.0f, 0.0f);
@@ -204,15 +296,38 @@ void source_render(const src_par_t *p, source_t *s, float sw, float *out, int n)
         for (int k = 0; k < ncopy; k++) ya += gcopy * unit_tick(&s->a[1 + k], p->wa, sha, dtc[k], p->sync_r, pm);
         float x = (ya * norm + p->lvl_b * yb) * bmix;
         if (p->noise > 0.0005f) x += p->noise * rng_bi(&s->rng);
-        if (fo > 0.0005f) x = fold(x, fo);
-        if (tone_on) {
-            float v3 = x - s->svf2;
+        out[i] = x;
+    }
+}
+
+void source_render(const src_par_t *p, source_t *s, float sw, float semis, float *out, int n) {
+    float sv = sweep_shape(p, sw), lv = slfo_tick(p, s, n);
+    float timb = p->sw_timb * sv + p->sl_timb * lv;
+    float fo = clampf(p->fold + p->sw_fold * sv + p->sl_fold * lv, 0.0f, 1.0f);
+    float tone = clampf(p->tone + p->sw_tone * sv + p->sl_tone * lv, 0.0f, 1.0f);
+    float pitch = p->root + semis + p->sw_pitch * sv + p->sl_pitch * lv;
+    if (p->type == SRC_TYPE_WAVETABLE) {
+        render_wavetable(p, s, timb, pitch, out, n);
+    } else if (p->type == SRC_TYPE_ANALOG) {
+        render_analog(p, s, clampf(p->sha + timb, 0.0f, 1.0f), clampf(p->shb + timb, 0.0f, 1.0f), pitch, out, n);
+    } else {
+        memset(out, 0, (size_t)n * sizeof(float));
+        return;
+    }
+    if (fo > 0.0005f)
+        for (int i = 0; i < n; i++) out[i] = fold(out[i], fo);
+    if (tone < 0.999f) { /* tone: a 12 dB state-variable low-pass (TPT), bypassed when open */
+        float fc = 150.0f * powf(20000.0f / 150.0f, tone);
+        float g = tanf(DRZ_PI * fminf(fc, 0.45f * DRZ_FS) / DRZ_FS);
+        const float k = 1.41421356f;
+        float a1 = 1.0f / (1.0f + g * (g + k)), a2 = g * a1, a3 = g * a2;
+        for (int i = 0; i < n; i++) {
+            float v3 = out[i] - s->svf2;
             float v1 = a1 * s->svf1 + a2 * v3;
             float v2 = s->svf2 + a2 * s->svf1 + a3 * v3;
             s->svf1 = 2.0f * v1 - s->svf1;
             s->svf2 = 2.0f * v2 - s->svf2;
-            x = v2;
+            out[i] = v2;
         }
-        out[i] = x;
     }
 }

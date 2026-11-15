@@ -16,7 +16,7 @@ ALLOWED = {
     "strtof", "strtol", "atoi", "snprintf", "strchr",
     # libm
     "sinf", "cosf", "sincosf", "tanf", "expf", "exp2f", "logf", "powf", "sqrtf", "floorf", "fabsf", "roundf",
-    "lrintf", "log1pf", "fminf", "fmaxf", "tanhf",
+    "lrintf", "log1pf", "fminf", "fmaxf", "tanhf", "fmod",
     # compiler / runtime plumbing
     "__stack_chk_fail", "__stack_chk_guard", "__cxa_finalize", "__gmon_start__",
     "_ITM_deregisterTMCloneTable", "_ITM_registerTMCloneTable", "__errno_location",
@@ -24,6 +24,8 @@ ALLOWED = {
     # clock for the debug-only cpu_us key
     "clock_gettime",
 }
+# The first move_info read (src/dsp/scale.c via move_info.h), in create_instance: never on the audio callback.
+ALLOWED |= {"dlsym", "shm_open", "mmap", "mmap64", "close"}
 # The sample loader thread (M5, plan/04 section 5) will add pthread_*, fopen, fread, fclose,
 # opendir and readdir here, with a comment saying they never run on the audio callback.
 

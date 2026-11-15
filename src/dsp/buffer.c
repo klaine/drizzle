@@ -138,7 +138,7 @@ static void live_block(drz_inst_t *I, int frames) {
         I->src_live.sweep_s += (float)n / DRZ_FS;
         if (b->frozen) {
             if (b->xf_k >= DRZ_XFADE) continue; /* the source rests while frozen */
-            source_render(&I->sp, &I->src_live, sw, I->scratch, n);
+            source_render(&I->sp, &I->src_live, sw, I->track_semis, I->scratch, n);
             for (int i = 0; i < n && b->xf_k < DRZ_XFADE; i++, b->xf_k++) {
                 int32_t slot = b->ls + b->xf_k;
                 if (slot >= DRZ_RING) slot -= DRZ_RING;
@@ -147,8 +147,10 @@ static void live_block(drz_inst_t *I, int frames) {
             }
             continue;
         }
-        source_render(&I->sp, &I->src_live, sw, I->scratch, n);
+        source_render(&I->sp, &I->src_live, sw, I->track_semis, I->scratch, n);
         int32_t slot = (int32_t)(b->w % DRZ_RING);
+        /* the source's pitch for these 16 samples: grains reading them later transpose from it */
+        I->track16[slot / DRZ_SUB] = (int16_t)lrintf(clampf(I->track_semis, -300.0f, 300.0f) * 100.0f);
         for (int i = 0; i < n; i++) {
             d[slot] = I->scratch[i];
 #ifdef DRZ_TEST
@@ -192,7 +194,7 @@ static void scan_block(drz_inst_t *I, int frames) {
     for (int32_t done = 0; done < todo; done += DRZ_SUB) {
         int n = todo - done < DRZ_SUB ? todo - done : DRZ_SUB;
         int32_t k = b->render_k;
-        source_render(&I->sp, &I->src_tape, (float)k / (float)len, d + k, n);
+        source_render(&I->sp, &I->src_tape, (float)k / (float)len, 0.0f, d + k, n);
         for (int i = 0; i < n; i++) {
             int bi = (int)((int64_t)(k + i) * DRZ_BINS / len);
             uint8_t a = (uint8_t)(clampf(fabsf(d[k + i]), 0.0f, 1.0f) * 255.0f);
