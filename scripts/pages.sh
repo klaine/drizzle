@@ -40,6 +40,9 @@ else
 fi
 
 if [ "$PUSH" = 1 ]; then
+  # Know what the remote holds (a shallow or single-branch clone may not track it), so the forced
+  # push below only replaces the published commit it has seen.
+  git fetch -q --depth=1 origin +pages:refs/remotes/origin/pages 2>/dev/null || true
   if git rev-parse -q --verify refs/remotes/origin/pages >/dev/null; then
     git push --force-with-lease=pages:refs/remotes/origin/pages origin pages
   else
