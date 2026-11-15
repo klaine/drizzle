@@ -304,7 +304,7 @@ P("smp_norm", "Normalise", "Norm", "enum", 0, 0, "On", opts=OFF_ON)
 
 # --- patch categories (plan/12 section 4) ----------------------------------------------------------
 CATEGORIES = [("init", "Init"), ("pad", "Pad"), ("texture", "Texture"), ("drone", "Drone"),
-              ("keys", "Keys & Bells"), ("motion", "Motion"), ("rhythm", "Rhythm & Glitch"), ("sample", "Sample")]
+              ("keys", "Keys & Bells"), ("motion", "Motion"), ("rhythm", "Rhythm & Glitch"), ("sample", "Orchestra & Choir")]
 
 # --- Move pages (ui_hierarchy, plan/11) --------------------------------------------------------------
 # (level id, label, knobs, milestone). knobs: key or (key, short override). The root is the Main page.

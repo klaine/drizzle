@@ -251,12 +251,28 @@ class App {
     return h("div", { class: "ctl file-ctl" }, lab, this.link?.kind === "device" || window.schwungRemote ? h("span", {}) : pick, file, out);
   }
 
-  /** After a patch or state load in the browser: hand the engine the sample the patch names, if this browser has it. */
+  /** After a patch or state load in the browser: hand the engine the sample the patch names. A factory
+   * sample ("factory:Choir Ah.wav") comes with the page (assets/samples/choir_ah.mp3, decoded once);
+   * any other, from this browser's own store, if it has it. */
   async restoreSample() {
     const name = this.extra.smp_file;
     if (!name || !this.engine) return;
-    const data = await samples.get(name);
-    if (data) this.engine.loadSample(new Float32Array(data), name);
+    let data = null;
+    if (name.startsWith("factory:")) {
+      this.factory ??= new Map();
+      if (!this.factory.has(name)) {
+        const slug = name.slice(8).replace(/\.wav$/i, "").toLowerCase().replace(/[^a-z0-9]/g, "_");
+        this.factory.set(name, fetch(new URL("../samples/" + slug + ".mp3", here))
+          .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.arrayBuffer(); })
+          .then((b) => this.engine.decode(b))
+          .catch((err) => { this.factory.delete(name); console.warn("factory sample", name, err); return null; }));
+      }
+      data = await this.factory.get(name);
+    } else {
+      data = await samples.get(name);
+    }
+    /* still the sample the patch wants (a fast patch change may have moved on) */
+    if (data && this.extra.smp_file === name) this.engine.loadSample(new Float32Array(data), name);
   }
 
   /* -------------------------------------------------------------- controls */

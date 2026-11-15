@@ -123,6 +123,10 @@ cp src/module.json src/help.json src/canvas.js src/cards.js src/web_ui.html LICE
 rm -rf "$MODULE/assets"
 mkdir -p "$MODULE/assets/ui"
 cp src/web/*.js src/web/*.css build/ui/ui_meta.json "$MODULE/assets/ui/"
+# factory samples ("factory:<name>.wav" in a patch is <module>/samples/factory/<name>.wav)
+rm -rf "$MODULE/samples"
+mkdir -p "$MODULE/samples/factory"
+cp samples/factory/*.wav "$MODULE/samples/factory/"
 
 echo "== package"
 # COPYFILE_DISABLE keeps macOS tar from adding ._ AppleDouble files; --numeric-owner leaves the

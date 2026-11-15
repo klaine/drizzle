@@ -1,0 +1,82 @@
+[
+ {
+  "name": "Strings Chord",
+  "file": "Strings Chord.wav",
+  "root": 60,
+  "seconds": 5.0,
+  "about": "string sections on C major: cellos C4 G4, violas C5, violins E5 G5",
+  "source": "VSCO 2 CE (CC0 1.0)"
+ },
+ {
+  "name": "Violins E5",
+  "file": "Violins E5.wav",
+  "root": 76,
+  "seconds": 5.0,
+  "about": "violin section, sustained with vibrato",
+  "source": "VSCO 2 CE (CC0 1.0)"
+ },
+ {
+  "name": "Cellos C4",
+  "file": "Cellos C4.wav",
+  "root": 60,
+  "seconds": 5.0,
+  "about": "cello section, sustained with vibrato",
+  "source": "VSCO 2 CE (CC0 1.0)"
+ },
+ {
+  "name": "Tremolo Strings",
+  "file": "Tremolo Strings.wav",
+  "root": 69,
+  "seconds": 4.5,
+  "about": "violin section tremolo on A4 and E5",
+  "source": "VSCO 2 CE (CC0 1.0)"
+ },
+ {
+  "name": "Pizzicato Walk",
+  "file": "Pizzicato Walk.wav",
+  "root": 55,
+  "seconds": 5.4,
+  "about": "violin pizzicato, G3 up to D6, one note every 0.42 s",
+  "source": "VSCO 2 CE (CC0 1.0)"
+ },
+ {
+  "name": "Harp Glissando",
+  "file": "Harp Glissando.wav",
+  "root": 48,
+  "seconds": 4.6,
+  "about": "harp notes C3 to B5, 0.11 s apart, ringing",
+  "source": "VSCO 2 CE (CC0 1.0)"
+ },
+ {
+  "name": "Orchestra Tour",
+  "file": "Orchestra Tour.wav",
+  "root": 60,
+  "seconds": 4.5,
+  "about": "cellos, violas, violins, horn, flute, all on C, 0.85 s each",
+  "source": "VSCO 2 CE (CC0 1.0)"
+ },
+ {
+  "name": "Choir Ah",
+  "file": "Choir Ah.wav",
+  "root": 48,
+  "seconds": 5.0,
+  "about": "synthesised choir, C major, 'ah', four singers a part",
+  "source": "synthesised by make_samples.py (CC0 1.0)"
+ },
+ {
+  "name": "Choir Vowels",
+  "file": "Choir Vowels.wav",
+  "root": 48,
+  "seconds": 5.0,
+  "about": "synthesised men's choir on C3, a-e-i-o-u across the file",
+  "source": "synthesised by make_samples.py (CC0 1.0)"
+ },
+ {
+  "name": "Choir Oo",
+  "file": "Choir Oo.wav",
+  "root": 60,
+  "seconds": 5.0,
+  "about": "synthesised women's choir, C4 and G4, 'oo' opening to 'oh'",
+  "source": "synthesised by make_samples.py (CC0 1.0)"
+ }
+]

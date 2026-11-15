@@ -1,9 +1,11 @@
 /* Render one demo WAV (16-bit stereo, 44.1 kHz) per factory patch for listening:
  * build/drizzle_render <outdir>. A C minor chord builds up over two seconds, holds, and is released. */
+#define _POSIX_C_SOURCE 200809L /* nanosleep: sample patches wait for the loader */
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "drizzle.h"
 
@@ -77,6 +79,14 @@ int main(int argc, char **argv) {
         snprintf(buf, sizeof buf, "%d", i);
         sp(h, "preset", buf);
         for (int b = 0; b < S(2); b++) api->render_block(h, out, 128); /* the tape or ring fills */
+        for (int t = 0; t < 1000; t++) { /* a sample patch: its file loads */
+            char st[64];
+            api->get_param(h, "smp_status", st, sizeof st);
+            if (strcmp(st, "loading") != 0) break;
+            struct timespec ts = {0, 5 * 1000 * 1000};
+            nanosleep(&ts, NULL);
+        }
+        api->render_block(h, out, 128);
         char name[64], file[80];
         api->get_param(h, "preset_name", name, sizeof name);
         int k = 0;

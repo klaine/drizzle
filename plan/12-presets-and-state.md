@@ -32,8 +32,8 @@ a blob whose `fmt` is not `drizzle` is ignored.
 `name` and `category`; `gen.py` validates and expands them into `factory_presets.c`
 (binary `patch_t` per patch, Crest's method).
 
-**The v1 bank: 65 patches with Init** (Pad got one more than planned), mostly ambient and texture,
-with a rhythmic corner:
+**The bank: 78 patches with Init** (Pad got one more than planned), mostly ambient and texture,
+with a rhythmic corner and 13 patches on the factory samples ([04 §6](04-sources.md)):
 
 | Category | Count | Character |
 |---|---|---|
@@ -44,6 +44,7 @@ with a rhythmic corner:
 | Keys & Bells | 8 | Perc windows, short envelopes, Fifth/Oct pitch spray, Plate |
 | Motion | 6 | Sweep pitch tapes (swarms, glissandi), LFO 2 synced to Position, Live with `src_track` |
 | Rhythm & Glitch | 12 | Tempo mode, repeats, probability, Bar random, Bits crush, ping-pong delay |
+| Orchestra & Choir | 13 | Sample mode on the factory samples: string, harp and choir pads, a vowel morph, an orchestra morph on LFO 2, pizzicato and choir patterns in Tempo mode |
 
 Rules for every factory patch (from Crest's and Amino's banks):
 - Macros 1–4 do something audible: 1 motion, 2 texture/grit, 3 space, 4 the patch's trick.
@@ -57,8 +58,8 @@ Rules for every factory patch (from Crest's and Amino's banks):
 
 **Categories** in `params.py`: `CATEGORIES = [("init","Init"), ("pad","Pad"), ("texture","Texture"),
 ("drone","Drone"), ("keys","Keys & Bells"), ("motion","Motion"), ("rhythm","Rhythm & Glitch"),
-("sample","Sample")]`. Sample patches arrive with M5 and need bundled audio, which must be our
-own or CC0 ([00 §5](00-overview.md)); until then the category is unused.
+("sample","Orchestra & Choir")]`. Sample patches use the bundled factory samples, which are our
+own or CC0 ([00 §5](00-overview.md), [04 §6](04-sources.md)); a patch names one with `"sample"`.
 
 **Authoring** happens in the browser build: the patch dialog's "dump state" writes the JSON
 difference from INIT.

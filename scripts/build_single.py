@@ -45,6 +45,8 @@ def payload_files():
     for name in ("engine.js", "worklet.js"):
         files["assets/engine/" + name] = (WEB / name).read_bytes()
     files["assets/engine/drizzle.wasm"] = (SITE / "assets" / "engine" / "drizzle.wasm").read_bytes()
+    for p in sorted((ROOT / "samples" / "factory").glob("*.mp3")):  # the factory samples (CC0)
+        files["assets/samples/" + p.name] = p.read_bytes()
     return files
 
 

@@ -56,6 +56,8 @@ rm -rf "$SITE"
 mkdir -p "$SITE/assets/ui" "$SITE/assets/engine"
 cp src/web/*.js src/web/*.css build/ui/ui_meta.json "$SITE/assets/ui/"
 cp web/engine.js web/worklet.js build/drizzle.wasm "$SITE/assets/engine/"
+mkdir -p "$SITE/assets/samples"
+cp samples/factory/*.mp3 "$SITE/assets/samples/"   # the factory samples, as the page fetches them
 # The page is web_ui.html without the device bridge, so it boots the browser engine.
 "$PY" - src/web_ui.html "$SITE/index.html" <<'PYEOF'
 import sys

@@ -51,3 +51,13 @@ Ekstrand, released under CC0 1.0 (public domain dedication). No attribution is
 required; it is given here with thanks. Each table's source and licence are listed
 in `tools/wavegen/manifest.json`; the other tables are generated procedurally by
 Amino's `tools/wavegen/`.
+
+## VS Chamber Orchestra: Community Edition (CC0)
+
+The recorded factory samples in `samples/factory/` (Strings Chord, Violins E5, Cellos C4,
+Tremolo Strings, Pizzicato Walk, Harp Glissando, Orchestra Tour) are cut, tuned and mixed from
+[VSCO 2 CE](https://github.com/sgossner/VSCO-2-CE) by Versilian Studios (recorded by Sam Gossner
+and Simon Dalzell), released under CC0 1.0 (public domain dedication). No attribution is
+required; it is given here with thanks. `tools/samples/make_samples.py` lists every source file
+and the commit it was taken from. The choir samples (Choir Ah, Choir Oo, Choir Vowels) are
+synthesised by that script and are Drizzle's own.

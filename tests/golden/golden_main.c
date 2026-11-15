@@ -5,10 +5,12 @@
  * is robust to the last-bit float differences between machines.
  *
  *   build/drizzle_golden > fingerprints.json */
+#define _POSIX_C_SOURCE 200809L /* nanosleep: sample patches wait for the loader thread */
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "drizzle.h"
 
@@ -27,7 +29,18 @@ static void midi(void *h, int a, int b, int c) {
 /* Fill the buffer (1.5 s, so a Scan tape is ready), play a C minor chord for 3 s, release, 1 s. */
 static void case_render(const char *name, void *h, int first) {
     int16_t blk[256];
-    for (int b = 0; b < 517; b++) api->render_block(h, blk, 128);
+    for (int b = 0; b < 516; b++) api->render_block(h, blk, 128);
+    /* a sample patch: wait for the loader (it is asked for during the blocks above), without rendering,
+     * so every patch renders the same number of blocks whatever the machine's speed */
+    char st[64];
+    for (int t = 0; t < 1000; t++) {
+        api->get_param(h, "smp_status", st, sizeof st);
+        if (strcmp(st, "loading") != 0) break;
+        struct timespec ts = {0, 5 * 1000 * 1000};
+        nanosleep(&ts, NULL);
+    }
+    if (strncmp(st, "error", 5) == 0 || getenv("GOLDEN_DEBUG")) fprintf(stderr, "%s: sample %s\n", name, st);
+    api->render_block(h, blk, 128);
     static const int CHORD[3] = {48, 51, 55};
     for (int k = 0; k < 3; k++) midi(h, 0x90, CHORD[k], 100);
     double sl[2] = {0, 0}, pk = 0;
@@ -64,18 +77,23 @@ int main(void) {
     memset(&host, 0, sizeof host);
     host.get_bpm = fake_bpm;
     api = move_plugin_init_v2(&host);
+    /* every case in a fresh instance: no case depends on the ones before it (free-running LFOs, random
+     * streams, the clock), so adding a patch to the bank changes no other fingerprint */
     void *h = api->create_instance(".", "");
     char buf[64];
     api->get_param(h, "preset_count", buf, sizeof buf);
     int count = atoi(buf);
+    api->destroy_instance(h);
     printf("{\n");
     for (int i = 0; i < count; i++) {
+        h = api->create_instance(".", "");
         snprintf(buf, sizeof buf, "%d", i);
         api->set_param(h, "preset", buf);
         char name[64], key[80];
         api->get_param(h, "preset_name", name, sizeof name);
         snprintf(key, sizeof key, "patch %02d %s", i, name);
         case_render(key, h, i == 0);
+        api->destroy_instance(h);
     }
     /* feature cases that the factory bank may not cover */
     static const char *const CASES[][2] = {
@@ -87,8 +105,10 @@ int main(void) {
                                 "\"sl_rate\":\"0.4\",\"gr_rev\":\"0.5\",\"gr_pspr\":\"12\"}"},
     };
     for (size_t c = 0; c < sizeof CASES / sizeof CASES[0]; c++) {
+        h = api->create_instance(".", "");
         api->set_param(h, "state", CASES[c][1]);
         case_render(CASES[c][0], h, 0);
+        api->destroy_instance(h);
     }
     printf("\n}\n");
     return 0;

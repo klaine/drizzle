@@ -72,8 +72,14 @@ def parse_value(p, v):
     return v
 
 
+# A factory patch may name one of samples/factory/*.wav ("sample": "Choir Ah"); the Move loads it from
+# the module folder, the browser from its own copy (plan/04 section 6). Filled by load_factory, in bank order.
+FACTORY_SAMPLES = []
+
+
 def load_factory():
     presets = [("Init", "init", {})]
+    FACTORY_SAMPLES[:] = [""]
     for path in sorted(glob.glob(os.path.join(ROOT, "presets", "factory", "*.json"))):
         with open(path, "r", encoding="utf-8") as f:
             d = json.load(f)
@@ -85,6 +91,12 @@ def load_factory():
             assert k in BY_KEY, "%s: unknown key %s" % (os.path.basename(path), k)
             assert BY_KEY[k]["state"], "%s: %s is not saved in patches" % (os.path.basename(path), k)
             vals[k] = parse_value(BY_KEY[k], v)
+        smp = d.get("sample", "")
+        if smp:
+            assert os.path.exists(os.path.join(ROOT, "samples", "factory", smp + ".wav")), "%s: no samples/factory/%s.wav" % (path, smp)
+            assert vals.get("src_type") == BY_KEY["src_type"]["opts"].index("Sample"), "%s: a sample patch needs src_type Sample" % path
+            assert len("factory:" + smp + ".wav") < 120
+        FACTORY_SAMPLES.append("factory:" + smp + ".wav" if smp else "")
         presets.append((name, d["category"], vals))
     out = []
     for name, cat, vals in presets:
@@ -283,7 +295,8 @@ def emit_header():
           "extern const float DRZ_WINDOWS[DRZ_WIN_COUNT][DRZ_WIN_N + 2];",
           "extern const float DRZ_WIN_NORM[DRZ_WIN_COUNT];", "",
           "extern const int DRZ_FACTORY_COUNT;", "extern const char *const DRZ_FACTORY_NAMES[];",
-          "extern const float DRZ_FACTORY_VALUES[][P_COUNT];", "",
+          "extern const float DRZ_FACTORY_VALUES[][P_COUNT];",
+          "extern const char *const DRZ_FACTORY_SAMPLES[]; /* \"factory:<name>.wav\" or \"\" */", "",
           "/* The browse view (pb_*): factory indices grouped by category, and the Category page's list. */",
           "typedef struct { const char *label; uint16_t first, count; } drz_browse_cat_t;",
           "extern const uint16_t DRZ_BROWSE_ORDER[];", "extern const drz_browse_cat_t DRZ_BROWSE_CATS[];",
@@ -331,6 +344,8 @@ def emit_factory_c(presets):
          '#include "params_gen.h"', "", "const int DRZ_FACTORY_COUNT = %d;" % len(presets), "",
          "const char *const DRZ_FACTORY_NAMES[] = {"]
     L += ["    %s," % cstr(name) for name, _c, _r in presets]
+    L += ["};", "", "const char *const DRZ_FACTORY_SAMPLES[] = {"]
+    L += ["    %s," % cstr(s) for s in FACTORY_SAMPLES]
     L += ["};", "", "const float DRZ_FACTORY_VALUES[][P_COUNT] = {"]
     for name, _c, row in presets:
         L.append("    {  /* %s */" % name)
@@ -388,7 +403,8 @@ def ui_meta(presets):
     pages += [{"id": lid, "label": label, "knobs": [kn(k) for k in knobs]}
               for lid, label, knobs, ms in PM.LEVELS if ms <= PM.MILESTONE and not isinstance(knobs, dict)]
     return {"params": params, "pages": pages, "categories": [{"id": c, "label": l} for c, l in PM.CATEGORIES],
-            "patches": [{"name": n, "cat": c} for n, c, _r in presets],
+            "patches": [dict({"name": n, "cat": c}, **({"smp": FACTORY_SAMPLES[i]} if FACTORY_SAMPLES[i] else {}))
+                        for i, (n, c, _r) in enumerate(presets)],
             "modSources": PM.MOD_SOURCES, "modDests": PM.MOD_DESTS, "mmSlots": PM.MM_SLOTS,
             "tables": PM.TABLE_NAMES}
 

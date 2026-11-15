@@ -137,7 +137,7 @@ static void preset_load(drz_inst_t *I, int idx) {
     I->preset_idx = idx;
     I->browse_last = idx;
     patch_loaded(I);
-    smp_request(I, ""); /* factory patches carry no sample */
+    smp_request(I, DRZ_FACTORY_SAMPLES[idx]); /* "factory:<name>.wav" (from the module folder) or none */
 }
 
 /* Move's Factory Patches page steps through one category (pb_cat), as Crest's does. */

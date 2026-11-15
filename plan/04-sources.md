@@ -117,3 +117,35 @@ deterministic. In Live it runs freely in real time.
   samples into the wasm's `smp` through an exported function; files are kept in IndexedDB by name
   so a reload finds them.
 - **Live and Scan do not apply** to samples: the buffer is the file. `gr_scan` plays through it.
+
+## 6. Factory samples
+Ten short mono files in `samples/factory/` (16-bit, 44.1 kHz, 4.5–5.4 s), made by
+`tools/samples/make_samples.py`, which also writes `index.json` (name, root note, length, what
+each is made of, source):
+
+| Sample | Root | Made of |
+|---|---|---|
+| Strings Chord | C4 | Cello, viola and violin sections on C major |
+| Violins E5, Cellos C4 | E5, C4 | One section, sustained with vibrato |
+| Tremolo Strings | A4 | Violin section tremolo on A4 and E5 |
+| Pizzicato Walk | G3 | Violin pizzicato, G3 up to D6, a note every 0.42 s: Position picks the note |
+| Harp Glissando | C3 | Eleven harp notes 0.11 s apart, ringing |
+| Orchestra Tour | C4 | Cellos, violas, violins, horn and flute, all on C, 0.85 s each: Position picks the instrument |
+| Choir Ah, Choir Oo, Choir Vowels | C3, C4, C3 | Synthesised (below); Vowels moves a-e-i-o-u across the file |
+
+- **Recordings** come from VS Chamber Orchestra: Community Edition (VSCO 2 CE, Versilian Studios,
+  CC0 1.0), fetched from a pinned commit into `tools/samples/cache/` (git-ignored). The script
+  measures every note's pitch and tunes it (VSCO names strings, horn and flute with middle C as
+  "C3"; the harp uses the usual C4), trims, mixes and fades.
+- **The choir is synthesised** by the script: additive voices whose harmonics follow five vowel
+  formants (published formant tables), with vibrato, detune, drift and breath noise, four singers per
+  part and a short diffuse room. It is Drizzle's own material. No recorded CC0 choir was reachable when the
+  set was made; a recorded one can replace it under the same names.
+- **A patch names one** with `"sample": "Choir Ah"` in its JSON; `gen.py` checks the file exists and
+  that the patch is in Sample mode, and writes `"factory:Choir Ah.wav"` into `DRZ_FACTORY_SAMPLES`.
+  Loading the patch requests that path; the blob stores it like any other.
+- **On the Move** `factory:<name>` resolves to `<module_dir>/samples/factory/<name>`, which the
+  package carries (`create_instance`'s `module_dir`, kept by `smp_set_dir`).
+- **In the browser** the page fetches `assets/samples/<lower_case_name>.mp3` (96 kb/s, written by
+  the same script), decodes it once and hands it over as for a picked file; the single file embeds
+  the MP3s (about 0.6 MB).

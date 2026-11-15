@@ -34,6 +34,10 @@ built, measured, inert and different from the spec: update it when that changes.
   worklet, engine, embed.js), the browser synth. `presetbrowser.js`, `presetdrawer.js` and
   `presetbrowser.css` are byte-identical copies of Amino's.
 - **Samples:** `src/dsp/sample.c` owns the loader thread, the only code that touches files.
+- **Factory samples:** `samples/factory/*.wav` (Move) and `*.mp3` (browser) come from
+  `tools/samples/make_samples.py` (VSCO 2 CE recordings at a pinned commit, plus a synthesised
+  choir); they are committed. A patch names one with `"sample"`; `factory:<name>.wav` resolves to
+  `<module_dir>/samples/factory/`.
 
 ## Spec rules
 - `plan/` is the spec; once code exists, the code is the source of truth. If they disagree, fix one

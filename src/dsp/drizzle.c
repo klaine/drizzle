@@ -52,7 +52,7 @@ static drz_inst_t *claim(drz_inst_t *p) {
 }
 
 static void *drz_create_instance(const char *module_dir, const char *json_defaults) {
-    (void)module_dir;
+    smp_set_dir(module_dir);
     for (int i = 0; i < DRZ_MAX_INSTANCES; i++) {
         drz_inst_t *p = claim(&g_pool[i]);
         if (p) {

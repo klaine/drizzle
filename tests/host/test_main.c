@@ -254,6 +254,15 @@ static void test_presets(void) {
         snprintf(idx, sizeof idx, "%d", i);
         sp(h, "preset", idx);
         render(h, SEC, NULL, NULL); /* the tape or ring fills */
+        char st[96];
+        api->get_param(h, "smp_status", st, sizeof st);
+        for (int t = 0; t < 500 && strcmp(st, "loading") == 0; t++) { /* the loader answers (a sample patch's file) */
+            struct timespec ts = {0, 10 * 1000 * 1000};
+            nanosleep(&ts, NULL);
+            render(h, 128, NULL, NULL);
+            api->get_param(h, "smp_status", st, sizeof st);
+        }
+        if (strncmp(st, "error", 5) == 0 || strcmp(st, "loading") == 0) bad++;
         for (int k = 0; k < 3; k++) note_on(h, 48 + 3 * k + (k == 2), 100);
         render(h, 2 * SEC, L, R);
         if (!all_finite(L, 2 * SEC) || !all_finite(R, 2 * SEC) || peak(L, 2 * SEC) >= 0.99f) bad++;
@@ -1276,6 +1285,11 @@ static void test_samples(void) {
     render(h, SEC / 2, L, NULL);
     CHECK(peak(L, SEC / 2) == 0.0f, "and plays nothing");
     note_off(h, 69);
+    /* a factory sample: "factory:<name>" is <module_dir>/samples/factory/<name> */
+    sp(h, "state", "{\"fmt\":\"drizzle\",\"v\":\"1\",\"src_type\":\"Sample\",\"smp_file\":\"factory:Choir Ah.wav\"}");
+    CHECK(wait_status(h, "ready:", 3000) && I->smp_ready && abs(I->smp_frames - 5 * 44100) < 64, "a factory sample loads from the module folder (%d frames)", I->smp_frames);
+    api->get_param(h, "smp_file", st, sizeof st);
+    CHECK(strcmp(st, "factory:Choir Ah.wav") == 0, "and the patch keeps its factory name (%s)", st);
     sp(h, "preset", "0");
     CHECK(wait_status(h, "none", 2000), "a factory patch clears the sample");
     CHECK(I->guard_violations == 0, "no read outside the sample region (%u)", I->guard_violations);

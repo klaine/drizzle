@@ -223,6 +223,7 @@ static void set_status(smp_slot_t *s, const char *a, const char *b) {
 #if !defined(DRZ_WASM)
 static pthread_t g_thread;
 static _Atomic int g_running, g_quit;
+static char g_dir[DRZ_SMP_PATH]; /* the module folder: "factory:<name>" is <dir>/samples/factory/<name> */
 static int16_t g_stage[STAGE_MAX];
 static uint8_t g_chunk[CHUNK];
 
@@ -235,6 +236,11 @@ static void load(smp_slot_t *s, uint32_t r, const char *path, int norm) {
         set_status(s, "none", NULL);
         atomic_store_explicit(&s->ready, r, memory_order_release);
         return;
+    }
+    char full[2 * DRZ_SMP_PATH];
+    if (strncmp(path, "factory:", 8) == 0) {
+        snprintf(full, sizeof full, "%s/samples/factory/%s", g_dir[0] ? g_dir : ".", path + 8);
+        path = full;
     }
     FILE *f = fopen(path, "rb");
     if (!f) {
@@ -331,6 +337,15 @@ __attribute__((destructor)) static void stop_worker(void) {
 #endif
 
 /* ------------------------------------------------------------------ the audio side */
+
+/* Where the factory samples are (create_instance's module_dir); set before any load, not on the audio thread. */
+void smp_set_dir(const char *dir) {
+#if !defined(DRZ_WASM)
+    if (dir && dir[0]) snprintf(g_dir, sizeof g_dir, "%s", dir);
+#else
+    (void)dir;
+#endif
+}
 
 void smp_attach(drz_inst_t *I) {
     smp_slot_t *s = &g_slot[I->slot];

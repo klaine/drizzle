@@ -20,6 +20,7 @@ int32_t smp_resample(const int16_t *in, int32_t n, int32_t rate, int16_t *out, i
 void smp_normalise(int16_t *x, int32_t n);
 
 /* --- per instance, from the audio thread ---------------------------------------------------------- */
+void smp_set_dir(const char *dir);                         /* create_instance: where samples/factory/ is */
 void smp_attach(struct drz_inst *I);                      /* create_instance: start the worker, clear the slot */
 void smp_request(struct drz_inst *I, const char *path);   /* set_param("smp_file") */
 void smp_block(struct drz_inst *I);                       /* every block: acknowledge, pick up a finished load */

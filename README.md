@@ -61,6 +61,8 @@ flowchart LR
 - **Analog:** two band-limited oscillators (sine, triangle, saw, pulse with Shape), a stack of detuned
   copies, FM, sync and noise (Crest's oscillators).
 - **Sample:** any WAV file, mixed to mono and resampled on a loader thread; a start and end region.
+  Ten factory samples come with it: string sections, tremolo, pizzicato, harp and an "orchestra
+  tour" recorded by Versilian Studios (VSCO 2 CE, CC0), and a synthesised choir.
 - **Fold** and **Tone** shape either synth, and two motion generators move it: the **Sweep** (a curve
   across the tape, or over time) and the **Source LFO**, each to Timbre, Fold, Pitch and Tone.
 
@@ -99,9 +101,9 @@ Crush (Soft, Hard, Fold, and Bits for 8-bit grit), Chorus, Delay (tempo sync, pi
 
 ### Patches
 
-65 factory patches, levelled against each other: Init (4), Pad (15), Texture (12), Drone (8),
-Keys & Bells (8), Motion (6) and Rhythm & Glitch (12). Every patch gives Macros 1–4 a job (motion,
-texture, space and a trick of its own) and the mod wheel one more.
+78 factory patches, levelled against each other: Init (4), Pad (15), Texture (12), Drone (8),
+Keys & Bells (8), Motion (6), Rhythm & Glitch (12) and Orchestra & Choir (13). Every patch gives
+Macros 1–4 a job (motion, texture, space and a trick of its own) and the mod wheel one more.
 
 ## On the Move
 

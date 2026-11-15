@@ -198,7 +198,7 @@ const char DRZ_CHAIN_PARAMS[] =
     "7,\"step\":1,\"default\":60},{\"key\":\"smp_start\",\"name\":\"Sample Start\",\"short_name\":\"Start\",\"type\":\"float\",\"min\":0,"
     "\"max\":1,\"default\":0},{\"key\":\"smp_end\",\"name\":\"Sample End\",\"short_name\":\"End\",\"type\":\"float\",\"min\":0,\"max\":1,\"d"
     "efault\":1},{\"key\":\"smp_norm\",\"name\":\"Normalise\",\"short_name\":\"Norm\",\"type\":\"enum\",\"options\":[\"Off\",\"On\"],\"defa"
-    "ult\":1},{\"key\":\"preset\",\"name\":\"Factory Patch\",\"type\":\"int\",\"min\":0,\"max\":64,\"step\":1},{\"key\":\"smp_file\",\"name"
+    "ult\":1},{\"key\":\"preset\",\"name\":\"Factory Patch\",\"type\":\"int\",\"min\":0,\"max\":77,\"step\":1},{\"key\":\"smp_file\",\"name"
     "\":\"Sample\",\"type\":\"filepath\",\"root\":\"/data/UserData/UserLibrary/Drizzle\",\"filter\":\".wav\"},{\"key\":\"home\",\"name\""
     ":\"Drizzle\",\"type\":\"canvas\",\"canvas_script\":\"canvas.js\",\"as_page\":true,\"page_first\":true,\"show_value\":false,\"ex"
     "tra_keys\":[\"buf_view\",\"grain_view\",\"preset_name\",\"gr_dens\"]},{\"key\":\"browse\",\"name\":\"Patches\",\"type\":\"canvas\","

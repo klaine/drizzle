@@ -20,7 +20,8 @@ gate v1.0.0.
 | Effects: Crest's chain (Crush incl. Bits, Chorus, Delay, Reverb incl. Cloud), Reverb Freeze | Done |
 | Move UI: 29 levels from `params.py`, home page (buffer level and brightness, Position and Spray, live grains) and browser canvas, 34 cards, help | Done; drawn on a mock display only |
 | Remote UI and browser synth (`src/web/`, `web/`): knobs, perform strip, tabbed sections, touch keyboard, matrix table, shared preset browser; single file `build/drizzle.html` (0.74 MB) | Done; checked in headless Chromium (desktop, iPad and phone touch profiles, light and dark), standalone and with a mocked `schwungRemote`; not yet on a real iPad |
-| Factory bank: 65 patches in 7 categories, macros and wheel on every patch, levelled (`tools/level`) | Done; no Sample patches (no audio of our own yet) |
+| Factory bank: 78 patches in 8 categories, macros and wheel on every patch, levelled (`tools/level`) | Done |
+| Factory samples (`samples/factory/`, `tools/samples/make_samples.py`): 10 files from VSCO 2 CE (CC0) and a synthesised choir, `factory:` paths, served to the browser as MP3 | Done; the package grows to about 4.5 MB; not yet loaded on a Move |
 | Tests: 189 native checks under UBSan on both read paths, contract, 314 device-UI checks, golden audio over 69 cases, wasm test; CI workflow | Done |
 
 Build output: `dsp.so` 0.86 MB stripped (most of it the wavetables), package 0.55 MB. `chain_params` 22.1 KB,
@@ -49,7 +50,11 @@ Crest's estimate puts the Move's Cortex-A72 at 4–6× slower: the worst case ma
 - **Smoothing:** only the master volume is ramped. Grain parameters are latched per grain; source
   and effect knobs may zipper and are a listening item.
 - **Unfreeze** can click where recording resumes (a listening item).
-- **Bank size:** 65 with Init (15 pads, one more than planned).
+- **Bank size:** 78 with Init (15 pads, one more than planned; 13 sample patches).
+- **Choir:** synthesised, not recorded: no recorded CC0 choir was reachable when the samples were
+  made ([04 §6](04-sources.md)).
+- **Golden harness:** every case renders in a fresh instance, so adding a patch changes no other
+  fingerprint; a sample patch waits for its file without rendering extra blocks.
 - **Tempo mode** joins the grid on the step a note falls in if it came within the first quarter of
   it; a transport jump back re-syncs every voice.
 
@@ -62,7 +67,7 @@ Crest's estimate puts the Move's Cortex-A72 at 4–6× slower: the worst case ma
 6. `scripts/build.sh --profile`, the worst-case patch, 8 notes: read `cpu_us` (Q4); then 4 tracks of
    Drizzle with Move's own instruments, listening for xruns.
 7. Listen: the checklist of [13 §8](13-testing.md), aliasing of grains far above the root (R3), and
-   a run through all 65 patches with their macros.
+   a run through all 78 patches with their macros, including the sample patches loading their files from the package.
 
 ## Owner's decisions
 - The browser synth is published on the `pages` branch (`scripts/pages.sh --push` updates it).

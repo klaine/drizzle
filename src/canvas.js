@@ -9,7 +9,7 @@
  */
 (function () {
   /* BEGIN GENERATED META */
-  var META = {"count":65,"cats":["Init","Pad","Texture","Drone","Keys & Bells","Motion","Rhythm & Glitch"]};
+  var META = {"count":78,"cats":["Init","Pad","Texture","Drone","Keys & Bells","Motion","Rhythm & Glitch","Orchestra & Choir"]};
   /* END GENERATED META */
 
   function num(v) {

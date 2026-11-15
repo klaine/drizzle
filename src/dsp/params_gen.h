@@ -291,6 +291,7 @@ extern const float DRZ_WIN_NORM[DRZ_WIN_COUNT];
 extern const int DRZ_FACTORY_COUNT;
 extern const char *const DRZ_FACTORY_NAMES[];
 extern const float DRZ_FACTORY_VALUES[][P_COUNT];
+extern const char *const DRZ_FACTORY_SAMPLES[]; /* "factory:<name>.wav" or "" */
 
 /* The browse view (pb_*): factory indices grouped by category, and the Category page's list. */
 typedef struct { const char *label; uint16_t first, count; } drz_browse_cat_t;
