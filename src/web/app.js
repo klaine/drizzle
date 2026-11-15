@@ -83,24 +83,40 @@ class DeviceLink {
   async get() { return null; } /* the bridge pushes; nothing is asked */
 }
 
-/* drizzle.wasm in this browser, the patch kept in localStorage between visits. */
+/* drizzle.wasm in this browser, the patch kept in localStorage between visits: the state blob, and
+ * which factory patch it is and whether it was edited, so a reload shows the same patch by name. */
 const SAVE_KEY = "drizzle.state.v1";
+const WHERE_KEY = "drizzle.where.v1";
+
+/** What the last visit left: { state, preset, edits }, or null. */
+function savedPatch() {
+  try {
+    const state = localStorage.getItem(SAVE_KEY);
+    if (!state) return null;
+    const where = JSON.parse(localStorage.getItem(WHERE_KEY) || "{}");
+    return { state, preset: Number.isInteger(where.preset) ? where.preset : -1, edits: where.edits | 0 };
+  } catch (_) { return null; } /* storage blocked: start from INIT */
+}
 
 class LocalLink {
-  constructor(engine, meta) {
+  constructor(engine, meta, where) {
     this.engine = engine;
     this.meta = meta;
+    this.where = where; /* () => { preset, edits }: the page's view of the patch, saved with it */
     this.kind = "local";
     this.cb = () => {};
     this.saveTimer = 0;
   }
 
+  /** Back to what the last visit (or the engine before this one) left: an unedited factory patch by
+   * loading it, anything else from its state blob. Returns the edit count to show. */
   async init() {
-    try {
-      const saved = localStorage.getItem(SAVE_KEY);
-      if (saved) this.engine.set("state", saved);
-    } catch (_) { /* storage blocked: start from INIT */ }
+    const saved = savedPatch();
+    let edits = 0;
+    if (saved && saved.preset >= 0 && !saved.edits) this.engine.set("preset", saved.preset);
+    else if (saved) { this.engine.set("state", saved.state); edits = Math.max(1, saved.edits); }
     await this.pull();
+    return { edits, preset: saved && saved.preset };
   }
 
   onValues(cb) { this.cb = cb; }
@@ -129,12 +145,18 @@ class LocalLink {
     if (key === "preset" || key === "state" || key === "pb_index") this.pull().then(() => this.onLoad?.());
     else if (key === "mm_slot" || key === "mm_sel" || key === "mm_clear") this.pull(["mm_src", "mm_via", "mm_dst", "mm_dep", "mm_slot", "mm_clear"]);
     clearTimeout(this.saveTimer);
-    this.saveTimer = setTimeout(async () => {
-      try {
-        const st = await this.engine.get("state");
-        if (st) localStorage.setItem(SAVE_KEY, st);
-      } catch (_) { /* quota or blocked storage */ }
-    }, 800);
+    this.saveTimer = setTimeout(() => this.save(), 800);
+  }
+
+  /** Store the patch now (also when the page is hidden: a tablet may never come back to this tab). */
+  async save() {
+    clearTimeout(this.saveTimer);
+    try {
+      const st = await this.engine.get("state");
+      if (!st) return;
+      localStorage.setItem(SAVE_KEY, st);
+      localStorage.setItem(WHERE_KEY, JSON.stringify(this.where()));
+    } catch (_) { /* quota or blocked storage */ }
   }
 
   get(key) { return this.engine.get(key); }
@@ -789,21 +811,77 @@ class App {
   async startLocal(button) {
     button.disabled = true;
     try {
-      const { Engine } = await import("../engine/engine.js");
-      this.engine = await Engine.start(new URL("../engine/", here).href);
-      const link = new LocalLink(this.engine, this.meta);
-      link.onValues((vals) => this.receive(vals));
-      link.onLoad = () => this.restoreSample();
-      this.link = link;
-      await link.init();
-      this.restoreSample();
+      await this.bootEngine();
       this.midiIn();
       button.remove();
       this.stage?.classList.add("running");
+      this.keepAwake();
     } catch (err) {
       button.disabled = false;
-      button.textContent = "Start failed: " + err.message;
+      button.querySelector(".start-big").textContent = "Start failed: " + err.message;
     }
+  }
+
+  /** A new AudioContext and worklet, back on the stored patch. Runs inside a tap (the context may start). */
+  async bootEngine() {
+    const { Engine } = await import("../engine/engine.js");
+    const engine = await Engine.start(new URL("../engine/", here).href);
+    const link = new LocalLink(engine, this.meta, () => ({ preset: parseInt(this.extra.preset ?? "-1", 10), edits: this.edits || 0 }));
+    link.onValues((vals) => this.receive(vals));
+    link.onLoad = () => this.restoreSample();
+    const old = this.engine;
+    this.engine = engine;
+    this.link = link;
+    old?.close();
+    this.onEngine?.(engine);
+    const { edits, preset } = await link.init();
+    this.edits = edits;
+    if (edits && preset >= 0) this.extra.preset = String(preset); /* "Bit Rain, edited", not "–" */
+    for (const fn of this.listeners) fn([]);
+    this.restoreSample();
+  }
+
+  /* Tablets suspend the page's audio when the screen locks or the tab goes to the background, and do
+   * not always resume it. The patch is saved on the way out; on the way back, the next tap resumes the
+   * context, or, if it stays silent (a context the browser has closed or left stuck), builds a new one
+   * on the saved patch. Until then a "Tap to resume" overlay says why there is no sound. */
+  keepAwake() {
+    const resumeBtn = h("button", { class: "start resume", hidden: "" }, h("span", { class: "start-big" }, "Tap to resume audio"),
+      h("span", { class: "start-small" }, "The browser paused Drizzle while the screen was off"));
+    this.stage.append(resumeBtn);
+    let busy = false;
+    const alive = () => this.engine && this.engine.ctx.state === "running";
+    const advancing = async () => {
+      const t = this.engine.ctx.currentTime;
+      await new Promise((r) => setTimeout(r, 250));
+      return this.engine.ctx.currentTime > t;
+    };
+    const wake = async () => {
+      if (busy || !this.engine) return;
+      busy = true;
+      try {
+        const ctx = this.engine.ctx;
+        if (ctx.state !== "closed" && ctx.state !== "running") await Promise.race([ctx.resume(), new Promise((r) => setTimeout(r, 400))]);
+        if (!alive() || !(await advancing())) {
+          for (const n of [...this.held]) this.noteOff(n);
+          await this.bootEngine();
+        }
+      } catch (_) { /* the overlay stays: the next tap tries again */ }
+      busy = false;
+      resumeBtn.hidden = alive();
+    };
+    const check = () => { if (document.visibilityState === "visible" && this.engine && !alive()) resumeBtn.hidden = false; };
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") this.link?.save?.();
+      else { check(); wake(); } /* may work without a tap (desktop); else the overlay asks for one */
+    });
+    window.addEventListener("pagehide", () => this.link?.save?.());
+    window.addEventListener("pageshow", () => { check(); });
+    /* any tap is a chance to resume: iPad browsers only allow it inside one */
+    for (const t of ["pointerup", "touchend", "keydown"]) document.addEventListener(t, () => { if (!alive()) wake(); }, true);
+    resumeBtn.addEventListener("click", wake);
+    this.engine.ctx.addEventListener("statechange", check);
+    this.onEngine = (e) => e.ctx.addEventListener("statechange", check);
   }
 }
 
@@ -819,6 +897,18 @@ async function main() {
     link.onValues((vals) => app.receive(vals));
     app.link = link;
     return;
+  }
+  /* until Start: the patch the last visit left, so the page does not claim Init */
+  const saved = savedPatch();
+  if (saved) {
+    try {
+      const st = JSON.parse(saved.state), vals = {};
+      for (const k in st) if (k !== "fmt" && k !== "v" && k !== "name") vals[k] = st[k];
+      vals.preset_name = st.name;
+      vals.preset = String(saved.preset);
+      app.edits = saved.edits;
+      app.receive(vals);
+    } catch (_) { /* a broken blob: Start loads INIT */ }
   }
   const go = h("button", { class: "start", onclick: () => app.startLocal(go) }, h("span", { class: "start-big" }, "Start audio"),
     h("span", { class: "start-small" }, "Drizzle runs in this browser: tap to hear it"));

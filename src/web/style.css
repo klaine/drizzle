@@ -210,3 +210,4 @@ button.start:disabled .start-big { opacity: 0.6; }
   .mm-row .mm-dep { grid-column: 2 / 4; }
 }
 @media (hover: none) { .knob:hover { background: none; } .knob.active { background: var(--accent-soft); } .kb-tools .hint { display: none; } }
+button.start[hidden] { display: none; }

@@ -54,6 +54,12 @@ export class Engine {
     });
   }
 
+  /** Let go of the audio thread (a new engine replaces this one). */
+  close() {
+    try { this.node.disconnect(); } catch (_) { /* already gone */ }
+    this.ctx.close().catch(() => {});
+  }
+
   midi(m) { this.node.port.postMessage({ t: "midi", m }); }
 
   tempo(bpm, run) { this.node.port.postMessage({ t: "tempo", bpm, run }); }
