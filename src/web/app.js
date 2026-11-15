@@ -208,7 +208,7 @@ class App {
   /* The Sample page's file: a picker here, the path the Move's own browser chose on a Move. */
   sampleControl() {
     const out = h("output", {});
-    const lab = h("label", {}, "File");
+    const lab = h("span", { class: "k-lab" }, "File");
     const file = h("input", { type: "file", accept: "audio/*,.wav", hidden: "" });
     const pick = h("button", { type: "button", class: "chip", onclick: () => file.click() }, "Load sample…");
     file.addEventListener("change", async () => {
@@ -226,7 +226,7 @@ class App {
       } catch (err) { out.textContent = "Could not read " + f.name + ": " + err.message; }
     });
     this.listeners.add(() => { if (this.extra.smp_file !== undefined && !out.textContent.startsWith("Decoding")) out.textContent = this.extra.smp_file || "no sample"; });
-    return h("div", { class: "ctl" }, lab, this.link?.kind === "device" || window.schwungRemote ? h("span", {}) : pick, file, out);
+    return h("div", { class: "ctl file-ctl" }, lab, this.link?.kind === "device" || window.schwungRemote ? h("span", {}) : pick, file, out);
   }
 
   /** After a patch or state load in the browser: hand the engine the sample the patch names, if this browser has it. */
@@ -237,39 +237,179 @@ class App {
     if (data) this.engine.loadSample(new Float32Array(data), name);
   }
 
+  /* -------------------------------------------------------------- controls */
+
+  bind(key, update) {
+    if (!this.controls.has(key)) this.controls.set(key, []);
+    this.controls.get(key).push(update);
+    update(this.values.get(key));
+  }
+
+  /** A control for `key`: a rotary knob for numbers, segmented buttons for short choices, a menu else. */
   control(key, label) {
     if (key === "smp_file") return this.sampleControl();
     const p = this.byKey.get(key);
     if (!p) return h("div", { class: "ctl missing" }, key);
-    const out = h("output", {});
-    const lab = h("label", {}, label || p.s);
-    lab.title = p.n;
-    let input;
     if (p.t === "enum") {
-      input = h("select", { onchange: () => this.set(key, Number(input.value)) },
-        ...p.o.map((o, i) => h("option", { value: String(i) }, o)));
-    } else {
-      const step = p.t === "int" ? 1 : (p.mx - p.mn) / 1000;
-      input = h("input", { type: "range", min: String(p.mn), max: String(p.mx), step: String(step) });
-      input.addEventListener("input", () => this.set(key, Number(input.value)));
-      input.addEventListener("dblclick", () => this.set(key, p.d));
+      const short = p.o.length <= 4 && p.o.every((o) => o.length <= 7);
+      return short ? this.segmented(key, label) : this.menu(key, label);
     }
-    const update = (v) => {
-      input.value = String(v);
-      out.textContent = reading(p, v, this.meta, this.values);
-    };
-    if (!this.controls.has(key)) this.controls.set(key, []);
-    this.controls.get(key).push(update);
-    update(this.values.get(key));
-    return h("div", { class: "ctl" }, lab, input, out);
+    return this.knob(key, label);
   }
 
-  page(pg) {
-    const box = h("section", { class: "page" }, h("h2", {}, pg.label));
-    const grid = h("div", { class: "knobs" });
-    for (const k of pg.knobs) grid.append(Array.isArray(k) ? this.control(k[0], k[1]) : this.control(k));
-    box.append(grid);
+  /* A rotary knob: drag up or right to raise it (Shift for fine), wheel, arrow keys, double-click or
+   * double-tap for the default. The arc grows from the bottom, or from the top for a bipolar range. */
+  knob(key, label, size = "") {
+    const p = this.byKey.get(key);
+    const span = p.mx - p.mn, bip = p.mn < 0 && p.mx > 0;
+    const NS = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("viewBox", "0 0 64 64");
+    svg.setAttribute("class", "knob-svg");
+    const mk = (cls) => { const e = document.createElementNS(NS, "path"); e.setAttribute("class", cls); svg.append(e); return e; };
+    const track = mk("k-track"), arc = mk("k-arc"), tick = mk("k-tick");
+    const R = 25, C = 32, A0 = 135, A1 = 405;
+    const pt = (a, r = R) => [C + r * Math.cos(a * Math.PI / 180), C + r * Math.sin(a * Math.PI / 180)];
+    const path = (a, b) => {
+      if (Math.abs(b - a) < 0.5) return "";
+      const [x0, y0] = pt(Math.min(a, b)), [x1, y1] = pt(Math.max(a, b));
+      return `M${x0.toFixed(2)} ${y0.toFixed(2)}A${R} ${R} 0 ${Math.abs(b - a) > 180 ? 1 : 0} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
+    };
+    track.setAttribute("d", path(A0, A1));
+    const out = h("output", { class: "k-val" });
+    const lab = h("span", { class: "k-lab" }, label || p.s);
+    const el = h("div", { class: "knob" + (size ? " " + size : ""), tabindex: "0", role: "slider", title: p.n,
+      "aria-label": p.n, "aria-valuemin": String(p.mn), "aria-valuemax": String(p.mx) }, lab, svg, out);
+    const put = (v) => {
+      v = Math.min(p.mx, Math.max(p.mn, v));
+      if (p.t === "int") v = Math.round(v);
+      if (v !== this.values.get(key)) this.set(key, v);
+    };
+    this.bind(key, (v) => {
+      const t = (v - p.mn) / span, a = A0 + t * (A1 - A0);
+      arc.setAttribute("d", path(bip ? 270 : A0, a));
+      const [x0, y0] = pt(a, 13), [x1, y1] = pt(a, 21);
+      tick.setAttribute("d", `M${x0.toFixed(2)} ${y0.toFixed(2)}L${x1.toFixed(2)} ${y1.toFixed(2)}`);
+      out.textContent = reading(p, v, this.meta, this.values);
+      el.setAttribute("aria-valuenow", String(v));
+      el.setAttribute("aria-valuetext", out.textContent);
+    });
+    let drag = null, lastTap = 0;
+    el.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      el.focus({ preventScroll: true });
+      const now = performance.now();
+      if (now - lastTap < 300) { put(p.d); lastTap = 0; return; } /* double tap: the default */
+      lastTap = now;
+      el.setPointerCapture(e.pointerId);
+      drag = { x: e.clientX, y: e.clientY, v: this.values.get(key) };
+      el.classList.add("active");
+    });
+    el.addEventListener("pointermove", (e) => {
+      if (!drag) return;
+      const d = (e.clientX - drag.x) - (e.clientY - drag.y);
+      put(drag.v + d / (e.shiftKey ? 900 : 180) * span);
+    });
+    const end = () => { drag = null; el.classList.remove("active"); };
+    el.addEventListener("pointerup", end);
+    el.addEventListener("pointercancel", end);
+    el.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      put(this.values.get(key) - Math.sign(e.deltaY) * (p.t === "int" ? 1 : span * (e.shiftKey ? 0.002 : 0.01)));
+    }, { passive: false });
+    el.addEventListener("keydown", (e) => {
+      const step = p.t === "int" ? 1 : span * (e.shiftKey ? 0.002 : 0.01);
+      const d = { ArrowUp: step, ArrowRight: step, ArrowDown: -step, ArrowLeft: -step, PageUp: span / 10, PageDown: -span / 10 }[e.key];
+      if (d !== undefined) { e.preventDefault(); put(this.values.get(key) + d); }
+      else if (e.key === "Home") put(p.mn);
+      else if (e.key === "End") put(p.mx);
+      else if (e.key === "Delete" || e.key === "Backspace") put(p.d);
+    });
+    return el;
+  }
+
+  segmented(key, label) {
+    const p = this.byKey.get(key);
+    const buttons = p.o.map((o, i) => h("button", { type: "button", class: "seg-b", onclick: () => this.set(key, i) }, o));
+    this.bind(key, (v) => buttons.forEach((b, i) => {
+      b.classList.toggle("on", i === Math.round(v));
+      b.setAttribute("aria-pressed", String(i === Math.round(v)));
+    }));
+    return h("div", { class: "ctl seg-ctl" + (p.o.length > 2 ? " wide" : ""), title: p.n }, h("span", { class: "k-lab" }, label || p.s),
+      h("div", { class: "seg", role: "group", "aria-label": p.n }, ...buttons));
+  }
+
+  menu(key, label) {
+    const p = this.byKey.get(key);
+    const sel = h("select", { "aria-label": p.n, onchange: () => this.set(key, Number(sel.value)) },
+      ...p.o.map((o, i) => h("option", { value: String(i) }, o)));
+    this.bind(key, (v) => { sel.value = String(Math.round(v)); });
+    return h("div", { class: "ctl menu-ctl", title: p.n }, h("span", { class: "k-lab" }, label || p.s), sel);
+  }
+
+  /* An envelope's shape from its four knobs, on the env.c time laws (log time, so short and long both read). */
+  envPreview(pre) {
+    const NS = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("viewBox", "0 0 200 60");
+    svg.setAttribute("class", "env-svg");
+    svg.setAttribute("preserveAspectRatio", "none");
+    const fill = document.createElementNS(NS, "path"), line = document.createElementNS(NS, "path");
+    fill.setAttribute("class", "env-fill");
+    line.setAttribute("class", "env-line");
+    svg.append(fill, line);
+    const t = (x, max, bend = 1) => 0.0005 * Math.pow(max / 0.0005, Math.pow(x, bend));
+    const draw = () => {
+      const g = (k) => this.values.get(pre + "_" + k);
+      const w = (s) => 0.15 + Math.log10(1 + s * 20); /* log-ish width per stage */
+      const a = w(t(g("a"), 20)), d = w(t(g("d"), 22)), s = g("s"), hold = 0.6, r = w(t(g("r"), 25, 0.6));
+      const tot = a + d + hold + r, X = (x) => 4 + x / tot * 192, Y = (y) => 56 - y * 50;
+      const pts = [[0, 0], [a, 1], [a + d, s], [a + d + hold, s], [tot, 0]].map(([x, y]) => `${X(x).toFixed(1)},${Y(y).toFixed(1)}`);
+      line.setAttribute("d", "M" + pts.join("L"));
+      fill.setAttribute("d", "M" + pts.join("L") + "Z");
+    };
+    for (const k of ["a", "d", "s", "r"]) this.bind(pre + "_" + k, draw);
+    return svg;
+  }
+
+  panel(pg) {
+    const body = h("div", { class: "panel-body" });
+    for (const k of pg.knobs) body.append(Array.isArray(k) ? this.control(k[0], k[1]) : this.control(k));
+    const box = h("section", { class: "panel", "data-page": pg.id }, h("h3", {}, pg.label));
+    if (pg.id === "amp_env") box.append(this.envPreview("ae"));
+    if (pg.id === "mod_env") box.append(this.envPreview("me"));
+    box.append(body);
     return box;
+  }
+
+  /* The matrix as one table (standalone): every slot's source, via, destination and depth. On a Move the
+   * slots reach the page only through the Matrix Edit proxies, so it shows that page instead. */
+  matrixPanel() {
+    const rows = h("div", { class: "mm-rows" });
+    for (let n = 1; n <= this.meta.mmSlots; n++) {
+      const pre = "mm" + String(n).padStart(2, "0") + "_";
+      const sel = (k, opts) => {
+        const s = h("select", { "aria-label": `Slot ${n} ${k}`, onchange: () => this.set(pre + k, Number(s.value)) },
+          ...opts.map((o, i) => h("option", { value: String(i) }, i === 0 ? "–" : o)));
+        this.bind(pre + k, (v) => { s.value = String(Math.round(v)); });
+        return s;
+      };
+      const dep = h("input", { type: "range", min: "-1", max: "1", step: "0.01", class: "mm-dep", "aria-label": `Slot ${n} depth` });
+      const dv = h("output", { class: "mm-dv" });
+      dep.addEventListener("input", () => this.set(pre + "dep", Number(dep.value)));
+      dep.addEventListener("dblclick", () => this.set(pre + "dep", 0));
+      this.bind(pre + "dep", (v) => { dep.value = String(v); dv.textContent = (v > 0 ? "+" : "") + Math.round(v * 100) + "%"; });
+      const row = h("div", { class: "mm-row" }, h("span", { class: "mm-n" }, String(n)),
+        sel("src", this.meta.modSources), h("span", { class: "mm-x" }, "×"), sel("via", this.meta.modSources),
+        h("span", { class: "mm-x" }, "→"), sel("dst", this.meta.modDests), dep, dv);
+      const used = () => row.classList.toggle("used", this.values.get(pre + "src") > 0 && this.values.get(pre + "dst") > 0);
+      this.bind(pre + "src", used);
+      this.bind(pre + "dst", used);
+      rows.append(row);
+    }
+    return h("section", { class: "panel wide", "data-page": "matrix" }, h("h3", {}, "Mod Matrix"),
+      h("div", { class: "mm-head" }, h("span", {}, "#"), h("span", {}, "Source"), h("span", {}), h("span", {}, "Via"), h("span", {}),
+        h("span", {}, "Destination"), h("span", {}, "Depth")), rows);
   }
 
   /* -------------------------------------------------------------- buffer view (plan/11 section 4) */
@@ -379,30 +519,88 @@ class App {
     if (this.held.has(n) || !this.engine) return;
     this.held.add(n);
     this.engine.midi([0x90, n, vel]);
-    document.querySelector(`[data-note="${n}"]`)?.classList.add("on");
+    document.querySelector(`.key[data-note="${n}"]`)?.classList.add("on");
   }
 
   noteOff(n) {
+    if (this.hold && this.held.has(n)) { this.latched.add(n); return; }
     if (!this.held.delete(n)) return;
     this.engine?.midi([0x80, n, 0]);
-    document.querySelector(`[data-note="${n}"]`)?.classList.remove("on");
+    document.querySelector(`.key[data-note="${n}"]`)?.classList.remove("on");
   }
 
+  setHold(on) {
+    this.hold = on;
+    if (!on) for (const n of [...this.latched]) { this.latched.delete(n); this.noteOff(n); }
+  }
+
+  /* The on-screen keyboard: 25 keys from the octave's C. Touch, pen or mouse; slide across keys to play
+   * them in turn; several fingers at once; lower on a key plays louder. Nothing on it can be selected,
+   * zoomed or long-pressed into a callout (the page's CSS and the handlers below). */
   keyboard() {
-    const kb = h("div", { class: "keys" });
-    for (let n = 48; n < 73; n++) {
-      const black = [1, 3, 6, 8, 10].includes(n % 12);
-      const k = h("div", { class: "key" + (black ? " black" : ""), "data-note": String(n) });
-      k.addEventListener("pointerdown", (e) => { k.setPointerCapture(e.pointerId); this.noteOn(n, 100); });
-      k.addEventListener("pointerup", () => this.noteOff(n));
-      k.addEventListener("pointercancel", () => this.noteOff(n));
-      kb.append(k);
-    }
+    this.latched = new Set();
+    const kb = h("div", { class: "keys", "aria-label": "Keyboard" });
+    const label = h("span", { class: "oct-label" });
+    const build = () => {
+      for (const n of [...this.held]) this.noteOff(n);
+      kb.textContent = "";
+      const base = 12 * (this.octave + 1);
+      const whites = [];
+      for (let n = base; n <= base + 24; n++) if (![1, 3, 6, 8, 10].includes(n % 12)) whites.push(n);
+      const ww = 100 / whites.length;
+      whites.forEach((n, i) => {
+        const k = h("div", { class: "key white", "data-note": String(n), style: `left:${i * ww}%;width:${ww}%` });
+        if (n % 12 === 0) k.append(h("span", { class: "key-c" }, "C" + (n / 12 - 1)));
+        kb.append(k);
+      });
+      whites.forEach((n, i) => {
+        if ([0, 2, 5, 7, 9].includes(n % 12) && n + 1 <= base + 24)
+          kb.append(h("div", { class: "key black", "data-note": String(n + 1), style: `left:${(i + 1) * ww - ww * 0.32}%;width:${ww * 0.64}%` }));
+      });
+      label.textContent = "C" + this.octave + "–C" + (this.octave + 2);
+    };
+    build();
+    const pointers = new Map(); /* pointerId -> note */
+    const at = (e) => {
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      const k = el && el.closest && el.closest(".key");
+      if (!k || !kb.contains(k)) return null;
+      const r = k.getBoundingClientRect();
+      return { n: Number(k.dataset.note), vel: Math.round(40 + 87 * Math.min(1, Math.max(0, (e.clientY - r.top) / r.height))) };
+    };
+    kb.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      kb.setPointerCapture(e.pointerId);
+      const k = at(e);
+      if (!k) return;
+      pointers.set(e.pointerId, k.n);
+      if (this.hold && this.latched.has(k.n)) { this.latched.delete(k.n); this.hold = false; this.noteOff(k.n); this.hold = true; return; }
+      this.noteOn(k.n, k.vel);
+    });
+    kb.addEventListener("pointermove", (e) => {
+      if (!pointers.has(e.pointerId)) return;
+      const k = at(e), was = pointers.get(e.pointerId);
+      if (!k || k.n === was) return;
+      this.noteOff(was);
+      pointers.set(e.pointerId, k.n);
+      this.noteOn(k.n, k.vel);
+    });
+    const up = (e) => {
+      if (!pointers.has(e.pointerId)) return;
+      this.noteOff(pointers.get(e.pointerId));
+      pointers.delete(e.pointerId);
+    };
+    kb.addEventListener("pointerup", up);
+    kb.addEventListener("pointercancel", up);
+    kb.addEventListener("lostpointercapture", up);
+    for (const t of ["touchstart", "touchmove", "touchend", "gesturestart"]) kb.addEventListener(t, (e) => e.preventDefault(), { passive: false });
+    kb.addEventListener("contextmenu", (e) => e.preventDefault());
+
     const map = "awsedftgyhujkolp;'";
     window.addEventListener("keydown", (e) => {
       if (e.repeat || e.metaKey || e.ctrlKey || /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
-      if (e.key === "z") { this.octave = Math.max(1, this.octave - 1); return; }
-      if (e.key === "x") { this.octave = Math.min(7, this.octave + 1); return; }
+      if (e.key === "z") { this.octave = Math.max(1, this.octave - 1); build(); return; }
+      if (e.key === "x") { this.octave = Math.min(6, this.octave + 1); build(); return; }
       if (e.key === " ") { e.preventDefault(); this.set("buf_freeze", this.values.get("buf_freeze") >= 0.5 ? 0 : 1); return; }
       const i = map.indexOf(e.key.toLowerCase());
       if (i >= 0) this.noteOn(12 * (this.octave + 1) + i, 100);
@@ -411,8 +609,23 @@ class App {
       const i = map.indexOf(e.key.toLowerCase());
       if (i >= 0) for (let o = 1; o <= 7; o++) this.noteOff(12 * (o + 1) + i);
     });
-    return h("div", { class: "kbbox" }, kb,
-      h("p", { class: "hint" }, "Keys A–L play (W E T Y U O P sharps), Z / X octave, Space freezes, [ ] step patches."));
+
+    const octDown = h("button", { type: "button", class: "tool", "aria-label": "Octave down", onclick: () => { this.octave = Math.max(1, this.octave - 1); build(); } }, "–");
+    const octUp = h("button", { type: "button", class: "tool", "aria-label": "Octave up", onclick: () => { this.octave = Math.min(6, this.octave + 1); build(); } }, "+");
+    const hold = h("button", { type: "button", class: "tool toggle", "aria-pressed": "false" }, "Hold");
+    hold.onclick = () => { this.setHold(!this.hold); hold.classList.toggle("on", this.hold); hold.setAttribute("aria-pressed", String(this.hold)); };
+    /* the internal transport: Tempo-mode grains and synced LFOs follow it */
+    const bpm = h("input", { type: "number", min: "40", max: "240", value: "120", class: "bpm", "aria-label": "Tempo (BPM)" });
+    const play = h("button", { type: "button", class: "tool toggle", "aria-pressed": "false", "aria-label": "Transport" }, "▶");
+    let running = false;
+    const tempo = () => this.engine?.tempo(Math.min(240, Math.max(40, Number(bpm.value) || 120)), running);
+    play.onclick = () => { running = !running; play.classList.toggle("on", running); play.setAttribute("aria-pressed", String(running)); tempo(); };
+    bpm.addEventListener("change", tempo);
+    const tools = h("div", { class: "kb-tools" },
+      h("div", { class: "tool-group" }, octDown, label, octUp), hold,
+      h("div", { class: "tool-group" }, play, bpm, h("span", { class: "unit" }, "BPM")),
+      h("span", { class: "hint" }, "Keys A–L · Z/X octave · Space freeze · [ ] patches"));
+    return h("div", { class: "kbbox" }, tools, kb);
   }
 
   async midiIn() {
@@ -504,13 +717,73 @@ class App {
 
   /* -------------------------------------------------------------- boot */
 
+  /* The performance area: the root page's knobs, a big Freeze, the macros and the volume. */
+  perform() {
+    const root = this.meta.pages.find((p) => p.id === "root");
+    const main = h("div", { class: "perf-knobs" });
+    for (const k of root.knobs) {
+      const key = Array.isArray(k) ? k[0] : k, lab = Array.isArray(k) ? k[1] : undefined;
+      if (key === "buf_freeze") continue;
+      main.append(this.knob(key, lab, "big"));
+    }
+    const frz = h("button", { type: "button", class: "freeze", "aria-pressed": "false", title: "Freeze the buffer (Space, CC 69)",
+      onclick: () => this.set("buf_freeze", this.values.get("buf_freeze") >= 0.5 ? 0 : 1) }, h("span", { class: "frz-icon" }, "❄"), "Freeze");
+    this.bind("buf_freeze", (v) => { frz.classList.toggle("on", v >= 0.5); frz.setAttribute("aria-pressed", String(v >= 0.5)); });
+    const macros = h("div", { class: "perf-knobs macros" }, ...["mac1", "mac2", "mac3", "mac4"].map((k) => this.knob(k)), this.knob("patch_vol"));
+    return h("div", { class: "perform" },
+      h("div", { class: "perf-group" }, h("div", { class: "group-lab" }, "Grains"), main),
+      h("div", { class: "perf-group frz-group" }, frz),
+      h("div", { class: "perf-group" }, h("div", { class: "group-lab" }, "Macros"), macros));
+  }
+
+  /* The sections, as tabs mirroring the Move's section picker. */
+  sections(device) {
+    const byId = new Map(this.meta.pages.map((p) => [p.id, p]));
+    const TABS = [
+      ["source", "Source", ["source", "wavetable", "wavetable_mod", "analog", "analog_mod", "sample", "sweep", "source_lfo"]],
+      ["grains", "Grains", ["grains", "grain_pitch", "rhythm"]],
+      ["voice", "Voice", ["filter", "amp_env", "mod_env", "env_opts", "voice"]],
+      ["mod", "Modulation", ["lfo1", "lfo2", "pressure", "perform", device ? "matrix_edit" : "matrix"]],
+      ["fx", "Effects", ["crush", "chorus", "delay", "reverb"]],
+    ];
+    const SRC_PAGES = { wavetable: 0, wavetable_mod: 0, analog: 1, analog_mod: 1, sample: 2 };
+    let saved = "source";
+    try { saved = localStorage.getItem("drizzle.tab") || saved; } catch { /* no storage */ }
+    const bar = h("div", { class: "tabs", role: "tablist" });
+    const views = h("div", { class: "tab-views" });
+    const show = (id) => {
+      for (const b of bar.children) { const on = b.dataset.tab === id; b.classList.toggle("on", on); b.setAttribute("aria-selected", String(on)); }
+      for (const v of views.children) v.hidden = v.dataset.tab !== id;
+      try { localStorage.setItem("drizzle.tab", id); } catch { /* no storage */ }
+    };
+    for (const [id, label, pages] of TABS) {
+      bar.append(h("button", { type: "button", class: "tab", role: "tab", "data-tab": id, onclick: () => show(id) }, label));
+      const grid = h("div", { class: "panels", role: "tabpanel", "data-tab": id });
+      for (const pid of pages) {
+        if (pid === "matrix") { grid.append(this.matrixPanel()); continue; }
+        const pg = byId.get(pid);
+        if (!pg) continue;
+        const panel = this.panel(pg);
+        if (pid in SRC_PAGES) panel.dataset.src = String(SRC_PAGES[pid]);
+        grid.append(panel);
+      }
+      views.append(grid);
+    }
+    /* only the pages of the source in use */
+    this.bind("src_type", (v) => {
+      for (const p of views.querySelectorAll("[data-src]")) p.hidden = Number(p.dataset.src) !== Math.round(v);
+    });
+    show(TABS.some((t) => t[0] === saved) ? saved : "source");
+    return h("div", { class: "sections" }, bar, views);
+  }
+
   mount(root, device) {
     root.textContent = "";
-    root.append(this.patchBar(), this.bufferView());
+    const stage = h("div", { class: "stage" }, this.bufferView());
+    root.append(this.patchBar(), stage, this.perform());
     if (!device) root.append(this.keyboard());
-    const pages = h("div", { class: "pages" });
-    for (const pg of this.meta.pages) pages.append(this.page(pg));
-    root.append(pages);
+    root.append(this.sections(device));
+    this.stage = stage;
   }
 
   async startLocal(button) {
@@ -526,6 +799,7 @@ class App {
       this.restoreSample();
       this.midiIn();
       button.remove();
+      this.stage?.classList.add("running");
     } catch (err) {
       button.disabled = false;
       button.textContent = "Start failed: " + err.message;
@@ -546,8 +820,9 @@ async function main() {
     app.link = link;
     return;
   }
-  const go = h("button", { class: "start", onclick: () => app.startLocal(go) }, "Start audio");
-  root.prepend(go);
+  const go = h("button", { class: "start", onclick: () => app.startLocal(go) }, h("span", { class: "start-big" }, "Start audio"),
+    h("span", { class: "start-small" }, "Drizzle runs in this browser: tap to hear it"));
+  app.stage.append(go);
 }
 
 main();

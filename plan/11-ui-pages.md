@@ -100,11 +100,27 @@ Modulation, Pressure, FX, Tips (e.g. "Jitter 0 + high density = a pitched buzz",
 tone").
 
 ## 8. Remote UI and web
-`src/web_ui.html` + `src/web/` as in Crest: panel layout of every section, the full 12-slot
-matrix grid, the shared preset browser (`presetbrowser.js`, `presetdrawer.js`, `presetbrowser.css`
-are byte-identical copies of Amino's canonical files), and a large buffer view with live grains
-drawn from `buf_view` / `grain_view`. The same UI drives `drizzle.wasm` in `build/site` and in the
-single file `build/drizzle.html`. In the browser, Sample mode takes a dropped or picked `.wav`.
+`src/web_ui.html` + `src/web/` (`app.js`, `style.css`), one UI for the Remote UI, `build/site` and the
+single file `build/drizzle.html`:
+- **Header:** the shared preset browser (`presetbrowser.js`, `presetdrawer.js`, `presetbrowser.css`
+  are byte-identical copies of Amino's canonical files) and Patch JSON.
+- **Stage:** the buffer view (level as height, brightness as colour, Position ± Spray, live grains)
+  and the `wave_view` zoom; standalone, the Start audio overlay sits on it.
+- **Perform strip:** the Main page's knobs, a large Freeze toggle, Macros 1–4 and Volume.
+- **Keyboard** (standalone only): 25 keys, octave −/+, Hold, an internal transport (Play, BPM) for
+  Tempo grains and synced LFOs. Touch, pen or mouse through pointer events with capture: slide across
+  keys, several fingers, lower on a key is louder. The page sets `user-select: none`,
+  `-webkit-touch-callout: none` and `touch-action` so iPad and phone browsers never select text,
+  zoom or open a callout while playing; text fields opt back in.
+- **Sections** as tabs (Source, Grains, Voice, Modulation, Effects; the last one is remembered).
+  Source shows only the active source's pages. Numbers are rotary knobs (drag, Shift for fine,
+  wheel, arrow keys, double-tap for the default; bipolar arcs grow from the top), choices of two to
+  four short options are segmented buttons, longer lists menus. The envelopes draw their shape.
+  Standalone, the full 12-slot matrix is one table; on a Move, the Matrix Edit page.
+- Dark by default, a light theme under `prefers-color-scheme: light`; layouts for iPad landscape and
+  portrait and for phones.
+
+In the browser, Sample mode takes a picked `.wav`.
 
 ## 9. Contract generation
 `gen.py` builds `chain_params` and `ui_hierarchy` from `params.py` (`LEVELS`, as in Crest), strips

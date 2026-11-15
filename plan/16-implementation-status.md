@@ -19,7 +19,7 @@ gate v1.0.0.
 | Modulation: LFO 1 / 2 with direct depths, pressure, 12-slot matrix with list editor and proxies, 4 macros, `:effective` | Done |
 | Effects: Crest's chain (Crush incl. Bits, Chorus, Delay, Reverb incl. Cloud), Reverb Freeze | Done |
 | Move UI: 29 levels from `params.py`, home page (buffer level and brightness, Position and Spray, live grains) and browser canvas, 34 cards, help | Done; drawn on a mock display only |
-| Remote UI and browser synth (`src/web/`, `web/`), shared preset browser, single file `build/drizzle.html` (0.72 MB) | Done; checked in headless Chromium, standalone and with a mocked `schwungRemote` |
+| Remote UI and browser synth (`src/web/`, `web/`): knobs, perform strip, tabbed sections, touch keyboard, matrix table, shared preset browser; single file `build/drizzle.html` (0.74 MB) | Done; checked in headless Chromium (desktop, iPad and phone touch profiles, light and dark), standalone and with a mocked `schwungRemote`; not yet on a real iPad |
 | Factory bank: 65 patches in 7 categories, macros and wheel on every patch, levelled (`tools/level`) | Done; no Sample patches (no audio of our own yet) |
 | Tests: 189 native checks under UBSan on both read paths, contract, 314 device-UI checks, golden audio over 69 cases, wasm test; CI workflow | Done |
 
