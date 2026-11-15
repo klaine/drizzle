@@ -6,18 +6,29 @@ the product and [plan/README.md](plan/README.md) for the spec. This file covers 
 ## Commands
 
 ```sh
-scripts/build.sh              # native tests (fast and slow read paths), contract, aarch64 dsp.so, check_so.py, package
+scripts/build.sh              # gen --check, native tests (fast and slow read paths), contract, dsp.so, check_so.py, package, web
+scripts/build.sh --gen        # run tools/gen/gen.py first (after editing tools/gen/params.py or presets/factory)
 scripts/build.sh --bench      # also the native CPU benchmark
-scripts/build.sh --render     # also demo WAVs in build/demo
+scripts/build.sh --render     # also one demo WAV per factory patch in build/demo
 scripts/build.sh --profile    # dsp.so with the read-only cpu_us key (render time, not for release)
+scripts/build_web.sh          # drizzle.wasm, build/site (python3 -m http.server -d build/site 8765), build/drizzle.html
+scripts/pages.sh [--push]     # build/drizzle.html as index.html on the `pages` branch (build.sh runs it, without --push)
 scripts/deploy.sh [host]      # staged install on a Move; scripts/logs.sh follows the debug log
 ```
 zig comes from `PATH`, `$ZIG` or `pip install ziglang`.
 
 ## Status
-M0 skeleton. Milestones are in `plan/14-roadmap.md`; `plan/16-implementation-status.md` records
-what's built, measured and different from the spec: update it when that changes. Until M1's
-`tools/gen`, parameters are the hand-written table in `src/dsp/params.c` (keys as in `plan/10`).
+M1 done. Milestones are in `plan/14-roadmap.md`; `plan/16-implementation-status.md` records what's
+built, measured, inert and different from the spec: update it when that changes.
+
+## Where things come from
+- **Parameters, pages, categories:** `tools/gen/params.py`. `gen.py` writes `src/dsp/params_gen.*`,
+  `contract_gen.c`, `windows_gen.c`, `factory_presets.c` and `build/ui/*.json`. Pages carry a
+  milestone and appear in `ui_hierarchy` once `MILESTONE` reaches it.
+- **Factory patches:** `presets/factory/*.json`, only the values that differ from INIT. The browser
+  build's "Patch JSON" button writes one.
+- **Browser:** `web/` (the page, worklet and wasm host) is Drizzle's own; the Remote UI on the Move
+  (`src/web/`, with the shared preset browser) comes with M4.
 
 ## Spec rules
 - `plan/` is the spec; once code exists, the code is the source of truth. If they disagree, fix one
@@ -43,7 +54,7 @@ what's built, measured and different from the spec: update it when that changes.
   tape renders in fixed chunks per block. Only the sample loader thread (M5) touches files.
 - **Tests:** `-DDRZ_TEST` tags every ring slot with its absolute position, and the grain loop checks
   every point it reads; keep that check when changing the read paths.
-- **Generated files** (from M1: `params_gen.*`, `contract_gen.c`, `factory_presets.c`, `wavetables.c`,
+- **Generated files** (`params_gen.*`, `contract_gen.c`, `factory_presets.c`, `wavetables.c`,
   `windows_gen.c`, `build/ui/*.json`) come from `tools/gen/params.py` via `gen.py`; never hand-edit
   them. The build runs `gen.py --check`.
 - **Golden audio** covers every factory patch. An intended sound change needs `--write` and the

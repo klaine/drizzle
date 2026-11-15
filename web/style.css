@@ -1,0 +1,38 @@
+:root {
+  --bg: #f4f5f7; --panel: #ffffff; --ink: #1b1d22; --muted: #6b7280; --line: #d9dce3;
+  --accent: #d9822b; --wave: #4a78c2; --grain: #1b1d22;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #121317; --panel: #1b1d23; --ink: #e8e9ed; --muted: #9aa0ab; --line: #2c2f37;
+    --accent: #f0a050; --wave: #6f9de6; --grain: #ffffff; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; padding: 16px; background: var(--bg); color: var(--ink);
+  font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+#app { max-width: 1100px; margin: 0 auto; display: grid; gap: 12px; }
+button, select, textarea { font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 6px; padding: 6px 10px; }
+button { cursor: pointer; }
+button.start { font-size: 16px; padding: 12px; background: var(--accent); color: #fff; border: none; }
+.bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.bar .name { color: var(--muted); flex: 1; }
+.bufbox { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+.bufview { width: 100%; height: auto; display: block; border-radius: 4px; }
+.bufstatus { color: var(--muted); font-size: 12px; margin-top: 4px; }
+.kbbox .hint { color: var(--muted); font-size: 12px; margin: 4px 0 0; }
+.keys { display: flex; height: 90px; user-select: none; touch-action: none; }
+.key { flex: 1; border: 1px solid var(--line); background: var(--panel); border-radius: 0 0 4px 4px; }
+.key.black { background: var(--ink); flex: 0.7; margin: 0 -0.35% ; height: 60%; z-index: 1; }
+.key.on { background: var(--accent); }
+.pages { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+.page { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.page h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 8px; }
+.knobs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px 10px; }
+.ctl { display: grid; gap: 2px; min-width: 0; }
+.ctl label { font-size: 12px; font-weight: 600; }
+.ctl input[type=range] { width: 100%; accent-color: var(--accent); }
+.ctl select { padding: 2px 4px; width: 100%; }
+.ctl output { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#dump { width: 100%; font: 12px/1.4 ui-monospace, monospace; }
+@media (max-width: 520px) { .knobs { grid-template-columns: repeat(2, 1fr); } }

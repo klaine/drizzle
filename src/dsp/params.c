@@ -1,7 +1,6 @@
-/* Parameters, state blob and the Move contract, M0 (plan/10, plan/12). The table is hand-written
- * until tools/gen/params.py generates it at M1; the keys, ranges and mappings already follow plan/10. */
+/* Parameter store: get/set, state blob, factory bank and browser, display keys (plan/10, 11, 12).
+ * The table, the contract strings and the bank are generated from tools/gen/params.py. */
 #include <math.h>
-#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,46 +8,44 @@
 #include "drizzle.h"
 #include "dsp_util.h"
 
-static const char *const OFF_ON[] = {"Off", "On", NULL};
-static const char *const WAVES[] = {"Sine", "Saw", NULL};
-static const char *const WAVES_S[] = {"Sin", "Saw", NULL};
-
-const param_desc_t DRZ_PARAMS[P_COUNT] = {
-    [P_PATCH_VOL] = {"patch_vol", "Volume", "Vol", PK_FLOAT, 0, 1, 0.7f, NULL, NULL, 1},
-    [P_GR_POS] = {"gr_pos", "Position", "Pos", PK_FLOAT, 0, 1, 0.5f, NULL, NULL, 1},
-    [P_GR_SPRAY] = {"gr_spray", "Spray", "Spray", PK_FLOAT, 0, 1, 0.1f, NULL, NULL, 1},
-    [P_GR_SIZE] = {"gr_size", "Size", "Size", PK_FLOAT, 0, 1, 0.55f, NULL, NULL, 1},
-    [P_GR_DENS] = {"gr_dens", "Density", "Dens", PK_FLOAT, 0, 1, 0.5f, NULL, NULL, 1},
-    [P_GR_JIT] = {"gr_jit", "Jitter", "Jit", PK_FLOAT, 0, 1, 0.5f, NULL, NULL, 1},
-    [P_BUF_LEN] = {"buf_len", "Buffer Length", "Len", PK_FLOAT, 0, 1, 0.75f, NULL, NULL, 1},
-    [P_BUF_FREEZE] = {"buf_freeze", "Freeze", "Frz", PK_ENUM, 0, 1, 0, OFF_ON, OFF_ON, 1},
-    [P_SRC_ROOT] = {"src_root", "Source Root", "Root", PK_INT, 24, 96, 48, NULL, NULL, 1},
-    [P_AN_A_WAVE] = {"an_a_wave", "Wave A", "WavA", PK_ENUM, 0, 1, AW_SAW, WAVES, WAVES_S, 1},
-    [P_GR_SPREAD] = {"gr_spread", "Stereo Spread", "Sprd", PK_FLOAT, 0, 1, 0.5f, NULL, NULL, 1},
-};
-
 float map_size_s(float x) { return 0.005f * powf(400.0f, clampf(x, 0.0f, 1.0f)); }
 float map_dens_hz(float x) { return 0.5f * powf(500.0f, clampf(x, 0.0f, 1.0f)); }
 float map_buf_len_s(float x) { return 0.5f * powf(16.0f, clampf(x, 0.0f, 1.0f)); }
+float map_scan(float x) { return x * x * x * (1.0f / 16.0f); }
 
+/* Binary search over the generated key order. */
 int params_find(const char *key) {
-    for (int i = 0; i < P_COUNT; i++)
-        if (strcmp(DRZ_PARAMS[i].key, key) == 0) return i;
+    int lo = 0, hi = P_COUNT - 1;
+    while (lo <= hi) {
+        int mid = (lo + hi) / 2, id = DRZ_PARAMS_SORTED[mid];
+        int c = strcmp(key, DRZ_PARAMS[id].key);
+        if (c == 0) return id;
+        if (c < 0) hi = mid - 1;
+        else lo = mid + 1;
+    }
     return -1;
+}
+
+/* Keys whose change alters what the source renders: in Scan mode they restart the tape (plan/05 4). */
+static int is_source_key(int id) {
+    const char *k = DRZ_PARAMS[id].key;
+    return strncmp(k, "src_", 4) == 0 || strncmp(k, "an_", 3) == 0 || strncmp(k, "wt_", 3) == 0 ||
+           strncmp(k, "sw_", 3) == 0 || strncmp(k, "sl_", 3) == 0 || id == P_BUF_LEN;
 }
 
 void params_defaults(drz_inst_t *I) {
     for (int i = 0; i < P_COUNT; i++) I->v[i] = DRZ_PARAMS[i].def;
-    snprintf(I->name, sizeof I->name, "Init");
+    snprintf(I->name, sizeof I->name, "%s", DRZ_FACTORY_NAMES[0]);
+    I->preset_idx = 0;
     I->pdirty = 1;
 }
 
-/* Parse a value for parameter id; 0 when it is not a number or option name (nan and inf included). */
+/* Parse a value for parameter id: a number, or an enum option's name. 0 for junk, nan and inf. */
 static int parse_value(int id, const char *val, int len, float *out) {
     const param_desc_t *d = &DRZ_PARAMS[id];
     if (d->kind == PK_ENUM) {
-        for (int o = 0; d->options[o]; o++)
-            if ((int)strlen(d->options[o]) == len && strncmp(d->options[o], val, (size_t)len) == 0) {
+        for (int o = 0; o < d->nopts; o++)
+            if ((int)strlen(d->opts[o]) == len && strncmp(d->opts[o], val, (size_t)len) == 0) {
                 *out = (float)o;
                 return 1;
             }
@@ -61,7 +58,7 @@ static int parse_value(int id, const char *val, int len, float *out) {
     float f = strtof(tmp, &end);
     if (end == tmp || !isfinite(f)) return 0;
     if (d->kind != PK_FLOAT) f = roundf(f);
-    *out = clampf(f, d->min, d->max);
+    *out = clampf(f, d->mn, d->mx);
     return 1;
 }
 
@@ -78,32 +75,98 @@ static int copy_out(const char *s, int len, char *buf, int cap) {
     return len;
 }
 
-/* ------------------------------------------------------------------ state (plan/12 section 2) */
-
-static int state_write(const drz_inst_t *I, char *buf, int cap) {
-    int n = snprintf(buf, (size_t)cap, "{\"fmt\":\"drizzle\",\"v\":\"1\",\"name\":\"");
-    if (n < 0 || n >= cap) return -1;
-    for (const char *c = I->name; *c; c++) {
-        if (n + 3 >= cap) return -1;
-        if (*c == '"' || *c == '\\') buf[n++] = '\\';
-        buf[n++] = *c;
-    }
-    if (n + 2 >= cap) return -1;
-    buf[n++] = '"';
-    for (int i = 0; i < P_COUNT; i++) {
-        char val[32];
-        if (format_value(i, I->v[i], val, sizeof val) < 0) return -1;
-        int m = snprintf(buf + n, (size_t)(cap - n), ",\"%s\":\"%s\"", DRZ_PARAMS[i].key, val);
-        if (m < 0 || m >= cap - n) return -1;
-        n += m;
-    }
-    if (n + 2 > cap) return -1;
-    buf[n++] = '}';
-    buf[n] = 0;
-    return n;
+static int put_int(int v, char *buf, int cap) {
+    int n = snprintf(buf, (size_t)cap, "%d", v);
+    return n >= cap ? -1 : n;
 }
 
-/* Read the next "key":"value" pair from *p (bounded by end). Returns 0 at the end or on junk. */
+/* A new patch: every voice and grain fades, the buffer starts over (a Scan tape renders at once, a
+ * saved Live freeze waits for the ring to refill), and the effect tails are dropped. */
+static void patch_loaded(drz_inst_t *I) {
+    I->pdirty = 1;
+    voices_all_off(I, 1);
+    buffer_reset(I);
+    if (I->v[P_BUF_FREEZE] >= 0.5f) I->buf.wait_full = 1;
+    fx_reset(&I->fx);
+}
+
+/* ------------------------------------------------------------------ factory bank and browser */
+
+static void preset_load(drz_inst_t *I, int idx) {
+    if (idx < 0 || idx >= DRZ_FACTORY_COUNT) return;
+    memcpy(I->v, DRZ_FACTORY_VALUES[idx], sizeof I->v);
+    snprintf(I->name, sizeof I->name, "%s", DRZ_FACTORY_NAMES[idx]);
+    I->preset_idx = idx;
+    I->browse_last = idx;
+    patch_loaded(I);
+}
+
+/* Move's Factory Patches page steps through one category (pb_cat), as Crest's does. */
+static int browse_count(const drz_inst_t *I) {
+    return I->browse_cat <= 0 ? DRZ_FACTORY_COUNT : DRZ_BROWSE_CATS[I->browse_cat - 1].count;
+}
+
+static int browse_preset(const drz_inst_t *I, int pos) {
+    return I->browse_cat <= 0 ? pos : DRZ_BROWSE_ORDER[DRZ_BROWSE_CATS[I->browse_cat - 1].first + pos];
+}
+
+static int browse_pos(const drz_inst_t *I) {
+    int cur = I->preset_idx >= 0 ? I->preset_idx : I->browse_last;
+    if (cur < 0 || cur >= DRZ_FACTORY_COUNT) return -1;
+    if (I->browse_cat <= 0) return cur;
+    const drz_browse_cat_t *c = &DRZ_BROWSE_CATS[I->browse_cat - 1];
+    for (int i = 0; i < c->count; i++)
+        if (DRZ_BROWSE_ORDER[c->first + i] == cur) return i;
+    return -1;
+}
+
+/* ------------------------------------------------------------------ state (plan/12 section 2) */
+
+typedef struct {
+    char *b;
+    int cap, n, ok;
+} wr_t;
+
+static void w_str(wr_t *w, const char *s) {
+    int l = (int)strlen(s);
+    if (!w->ok || w->n + l + 1 > w->cap) {
+        w->ok = 0;
+        return;
+    }
+    memcpy(w->b + w->n, s, (size_t)l + 1);
+    w->n += l;
+}
+
+static int state_save(const drz_inst_t *I, char *buf, int cap) {
+    wr_t w = {buf, cap, 0, cap > 0};
+    if (cap > 0) buf[0] = 0;
+    w_str(&w, "{\"fmt\":\"drizzle\",\"v\":\"1\",\"name\":\"");
+    for (const char *p = I->name; *p; p++) {
+        char c[3] = {0, 0, 0};
+        if (*p == '"' || *p == '\\') {
+            c[0] = '\\';
+            c[1] = *p;
+        } else if ((unsigned char)*p >= 32 && (unsigned char)*p < 127) {
+            c[0] = *p;
+        }
+        w_str(&w, c);
+    }
+    w_str(&w, "\"");
+    for (int i = 0; i < P_COUNT; i++) {
+        if (!(DRZ_PARAMS[i].flags & PF_STATE)) continue;
+        char val[24];
+        if (format_value(i, I->v[i], val, sizeof val) < 0) return -1;
+        w_str(&w, ",\"");
+        w_str(&w, DRZ_PARAMS[i].key);
+        w_str(&w, "\":\"");
+        w_str(&w, val);
+        w_str(&w, "\"");
+    }
+    w_str(&w, "}");
+    return w.ok ? w.n : -1;
+}
+
+/* The next "key":"value" pair from *p, bounded by end; 0 at the end or on junk. */
 static int next_pair(const char **p, const char *end, const char **k, int *kl, const char **v, int *vl) {
     const char *s = *p;
     while (s < end && *s != '"') s++;
@@ -126,18 +189,21 @@ static int next_pair(const char **p, const char *end, const char **k, int *kl, c
     return 1;
 }
 
+/* Tolerant single pass (plan/12 sections 1-3): the blob must carry "fmt":"drizzle", unknown keys are
+ * ignored, missing ones keep their INIT value. Never reads past the terminating NUL. */
 static void state_load(drz_inst_t *I, const char *blob) {
     const char *end = blob + strlen(blob);
     const char *p = blob, *k, *v;
     int kl, vl, ok = 0;
-    /* The format tag must be there and be ours, or the patch is left alone (plan/12 section 3). */
     while (next_pair(&p, end, &k, &kl, &v, &vl))
         if (kl == 3 && strncmp(k, "fmt", 3) == 0) {
             ok = vl == 7 && strncmp(v, "drizzle", 7) == 0;
             break;
         }
     if (!ok) return;
-    params_defaults(I); /* missing keys fall back to INIT */
+    for (int i = 0; i < P_COUNT; i++)
+        if (DRZ_PARAMS[i].flags & PF_STATE) I->v[i] = DRZ_PARAMS[i].def;
+    snprintf(I->name, sizeof I->name, "Init");
     p = blob;
     while (next_pair(&p, end, &k, &kl, &v, &vl)) {
         if (kl == 4 && strncmp(k, "name", 4) == 0) {
@@ -149,93 +215,68 @@ static void state_load(drz_inst_t *I, const char *blob) {
             I->name[o] = 0;
             continue;
         }
-        char key[32];
+        char key[40];
         if (kl <= 0 || kl >= (int)sizeof key) continue;
         memcpy(key, k, (size_t)kl);
         key[kl] = 0;
         int id = params_find(key);
         float f;
-        if (id >= 0 && parse_value(id, v, vl, &f)) I->v[id] = f;
+        if (id >= 0 && (DRZ_PARAMS[id].flags & PF_STATE) && parse_value(id, v, vl, &f)) I->v[id] = f;
     }
-    I->pdirty = 1;
-    /* A new patch: voices and grains fade, the ring starts over, and a saved freeze is redone once
-     * the source has filled buf_len (plan/05 section 3). */
-    for (int vi = 0; vi < DRZ_VOICES; vi++) {
-        I->voice[vi].gate = 0;
-        voice_kill_grains(I, vi);
-    }
-    buffer_reset(I);
-    if (I->v[P_BUF_FREEZE] >= 0.5f) I->buf.wait_full = 1;
+    I->preset_idx = -1;
+    patch_loaded(I);
 }
 
-/* ------------------------------------------------------------------ contract (plan/11) */
+/* ------------------------------------------------------------------ display (plan/11 section 4) */
 
-static char g_chain_params[4096];
-static int g_chain_len;
-static char g_ui_hierarchy[1024];
-static int g_ui_len;
-
-static int append(char *buf, int cap, int n, const char *fmt, ...) __attribute__((format(printf, 4, 5)));
-static int append(char *buf, int cap, int n, const char *fmt, ...) {
-    if (n < 0 || n >= cap) return -1;
-    va_list ap;
-    va_start(ap, fmt);
-    int m = vsnprintf(buf + n, (size_t)(cap - n), fmt, ap);
-    va_end(ap);
-    return m < 0 || m >= cap - n ? -1 : n + m;
-}
-
-static const char *const MAIN_KNOBS[8] = {"gr_pos", "gr_spray", "gr_size", "gr_dens",
-                                          "gr_jit", "buf_len", "buf_freeze", "patch_vol"};
-static const char *const SOURCE_KNOBS[3] = {"src_root", "an_a_wave", "gr_spread"};
-
-void params_build_contract(void) {
-    if (g_chain_len > 0) return;
-    char *b = g_chain_params;
-    int cap = (int)sizeof g_chain_params, n = 0;
-    n = append(b, cap, n, "[");
-    for (int i = 0; i < P_COUNT; i++) {
-        const param_desc_t *d = &DRZ_PARAMS[i];
-        if (!d->cp) continue;
-        n = append(b, cap, n, "%s{\"key\":\"%s\",\"name\":\"%s\",\"short_name\":\"%s\"", n > 1 ? "," : "", d->key,
-                   d->name, d->short_name);
-        if (d->kind == PK_ENUM) {
-            n = append(b, cap, n, ",\"type\":\"enum\",\"options\":[");
-            for (int o = 0; d->options[o]; o++) n = append(b, cap, n, "%s\"%s\"", o ? "," : "", d->options[o]);
-            n = append(b, cap, n, "],\"short_options\":[");
-            for (int o = 0; d->short_options[o]; o++) n = append(b, cap, n, "%s\"%s\"", o ? "," : "", d->short_options[o]);
-            n = append(b, cap, n, "],\"default\":%d}", (int)d->def);
-        } else if (d->kind == PK_INT) {
-            n = append(b, cap, n, ",\"type\":\"int\",\"min\":%d,\"max\":%d,\"step\":1,\"default\":%d}", (int)d->min,
-                       (int)d->max, (int)d->def);
-        } else {
-            n = append(b, cap, n, ",\"type\":\"float\",\"min\":%g,\"max\":%g,\"default\":%g}", (double)d->min,
-                       (double)d->max, (double)d->def);
-        }
+/* "<mode><frozen><progress><head>" then 128 bins, all hex: mode L/S, frozen 0/1, progress 00..FF of a
+ * running tape render (FF = none), head position 00..FF along the readable range. */
+static int buf_view(const drz_inst_t *I, char *buf, int cap) {
+    static const char HEX[] = "0123456789ABCDEF";
+    if (cap < 6 + 2 * DRZ_BINS + 1) return -1;
+    const buffer_t *b = &I->buf;
+    int scan = b->mode == BUF_MODE_SCAN;
+    int prog = scan && b->rendering && b->render_len > 0 ? (int)(255LL * b->render_k / b->render_len) : 255;
+    if (prog > 254 && scan && b->rendering) prog = 254;
+    int head = 255; /* Live: the newest sample is at the right edge */
+    buf[0] = scan ? 'S' : 'L';
+    buf[1] = b->frozen ? '1' : '0';
+    buf[2] = HEX[prog >> 4];
+    buf[3] = HEX[prog & 15];
+    buf[4] = HEX[head >> 4];
+    buf[5] = HEX[head & 15];
+    const uint8_t *bins = b->bins[scan && b->front >= 0 ? b->front : 0];
+    for (int i = 0; i < DRZ_BINS; i++) {
+        buf[6 + 2 * i] = HEX[bins[i] >> 4];
+        buf[7 + 2 * i] = HEX[bins[i] & 15];
     }
-    n = append(b, cap, n, "]");
-    g_chain_len = n;
-
-    b = g_ui_hierarchy;
-    cap = (int)sizeof g_ui_hierarchy;
-    n = append(b, cap, 0, "{\"levels\":{\"root\":{\"label\":\"Drizzle\",\"knobs\":[");
-    for (int i = 0; i < 8; i++) n = append(b, cap, n, "%s\"%s\"", i ? "," : "", MAIN_KNOBS[i]);
-    n = append(b, cap, n, "],\"params\":[");
-    for (int i = 0; i < 8; i++) n = append(b, cap, n, "\"%s\",", MAIN_KNOBS[i]);
-    n = append(b, cap, n, "{\"level\":\"source\",\"label\":\"Source\"}]},\"source\":{\"label\":\"Source\",\"knobs\":[");
-    for (int i = 0; i < 3; i++) n = append(b, cap, n, "%s\"%s\"", i ? "," : "", SOURCE_KNOBS[i]);
-    n = append(b, cap, n, "],\"params\":[");
-    for (int i = 0; i < 3; i++) n = append(b, cap, n, "%s\"%s\"", i ? "," : "", SOURCE_KNOBS[i]);
-    n = append(b, cap, n, "]}}}");
-    g_ui_len = n;
+    buf[6 + 2 * DRZ_BINS] = 0;
+    return 6 + 2 * DRZ_BINS;
 }
 
-/* ------------------------------------------------------------------ get / set */
+/* ------------------------------------------------------------------ set / get */
 
 void params_set(drz_inst_t *I, const char *key, const char *val) {
     if (!key || !val) return;
     if (strcmp(key, "state") == 0) {
         state_load(I, val);
+        return;
+    }
+    if (strcmp(key, "preset") == 0) {
+        preset_load(I, atoi(val));
+        return;
+    }
+    if (strcmp(key, "pb_cat") == 0) { /* browse state, not sound: never in the blob */
+        I->browse_cat = clampi(atoi(val), 0, DRZ_BROWSE_CAT_COUNT);
+        return;
+    }
+    if (strcmp(key, "pb_index") == 0) {
+        int pos = atoi(val);
+        if (pos >= 0 && pos < browse_count(I)) preset_load(I, browse_preset(I, pos));
+        return;
+    }
+    if (strcmp(key, "name") == 0) {
+        snprintf(I->name, sizeof I->name, "%s", val);
         return;
     }
     int id = params_find(key);
@@ -244,21 +285,44 @@ void params_set(drz_inst_t *I, const char *key, const char *val) {
     if (f == I->v[id]) return; /* Scenes resend unchanged values every block */
     I->v[id] = f;
     I->pdirty = 1;
+    if (is_source_key(id)) buffer_source_changed(I);
 }
 
 int params_get(drz_inst_t *I, const char *key, char *buf, int buf_len) {
-    if (!key || !buf || buf_len <= 0) return -1;
-    if (strcmp(key, "chain_params") == 0) return copy_out(g_chain_params, g_chain_len, buf, buf_len);
-    if (strcmp(key, "ui_hierarchy") == 0) return copy_out(g_ui_hierarchy, g_ui_len, buf, buf_len);
-    if (strcmp(key, "state") == 0) return state_write(I, buf, buf_len);
-    if (strcmp(key, "name") == 0 || strcmp(key, "preset_name") == 0)
+    if (!key || !buf || buf_len < 1) return -1;
+    if (strcmp(key, "chain_params") == 0) return copy_out(DRZ_CHAIN_PARAMS, DRZ_CHAIN_PARAMS_LEN, buf, buf_len);
+    if (strcmp(key, "ui_hierarchy") == 0) return copy_out(DRZ_UI_HIERARCHY, DRZ_UI_HIERARCHY_LEN, buf, buf_len);
+    if (strcmp(key, "state") == 0) return state_save(I, buf, buf_len);
+    if (strcmp(key, "preset") == 0) return put_int(I->preset_idx, buf, buf_len);
+    if (strcmp(key, "preset_count") == 0) return put_int(DRZ_FACTORY_COUNT, buf, buf_len);
+    if (strcmp(key, "preset_name") == 0 || strcmp(key, "name") == 0)
         return copy_out(I->name, (int)strlen(I->name), buf, buf_len);
+    if (strcmp(key, "pb_cats") == 0)
+        return copy_out(DRZ_BROWSE_CATS_JSON, (int)strlen(DRZ_BROWSE_CATS_JSON), buf, buf_len);
+    if (strcmp(key, "pb_cat") == 0) return put_int(I->browse_cat, buf, buf_len);
+    if (strcmp(key, "pb_count") == 0) return put_int(browse_count(I), buf, buf_len);
+    if (strcmp(key, "pb_index") == 0) return put_int(browse_pos(I), buf, buf_len);
+    if (strcmp(key, "buf_view") == 0) return buf_view(I, buf, buf_len);
+    if (strcmp(key, "grain_view") == 0) return grains_view(I, buf, buf_len);
+    if (strcmp(key, "smp_status") == 0) return copy_out("none", 4, buf, buf_len);
+    if (strcmp(key, "split_voices") == 0) return copy_out("", 0, buf, buf_len);
 #ifdef DRZ_PROFILE
     if (strcmp(key, "cpu_us") == 0) {
         int n = snprintf(buf, (size_t)buf_len, "%.1f", (double)I->cpu_us);
         return n >= buf_len ? -1 : n;
     }
 #endif
+    const char *colon = strchr(key, ':');
+    if (colon && strcmp(colon, ":effective") == 0) { /* modulation arrives with M3: the base value */
+        char base[40];
+        int kl = (int)(colon - key);
+        if (kl <= 0 || kl >= (int)sizeof base) return -1;
+        memcpy(base, key, (size_t)kl);
+        base[kl] = 0;
+        int id = params_find(base);
+        if (id < 0 || !(DRZ_PARAMS[id].flags & PF_LIVE)) return -1;
+        return format_value(id, I->v[id], buf, buf_len);
+    }
     int id = params_find(key);
     if (id < 0) return -1;
     return format_value(id, I->v[id], buf, buf_len);

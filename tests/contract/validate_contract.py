@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Validate Drizzle's Move contract (plan/13 section 1), adapted from Crest's.
 
-Reads build/chain_params.json and build/ui_hierarchy.json (written by build/drizzle_test, from the
-module's own get_param answers; tools/gen/gen.py writes them from M1 on) plus
+Reads build/chain_params.json and build/ui_hierarchy.json (written by tools/gen/gen.py) plus
 src/module.json and src/help.json. Exits non-zero on the first failing group of checks.
 """
 import json
@@ -116,7 +115,12 @@ for lid, lv in levels.items():
 for lid in levels:
     if lid not in reachable:
         err("level %r is not reachable from root" % lid)
-# The patch browser checks (factory / category / browse levels) come back with the factory bank (M4).
+# The patch browser: Factory Patches steps through the category that Patch Category picks (params.c pb_*).
+fac, cat = levels.get("factory", {}), levels.get("category", {})
+if (fac.get("list_param"), fac.get("count_param"), fac.get("name_param")) != ("pb_index", "pb_count", "preset_name"):
+    err("factory: the browser must be pb_index / pb_count / preset_name")
+if (cat.get("items_param"), cat.get("select_param"), cat.get("navigate_to")) != ("pb_cats", "pb_cat", "factory"):
+    err("category: must pick pb_cat from pb_cats and land on factory")
 if minified(cp) + minified(uh) >= 64 * 1024:
     err("chain_params + ui_hierarchy exceed 64 KiB")
 

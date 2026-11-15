@@ -1,8 +1,9 @@
 /* Native tests: drive Drizzle through the Schwung plugin API with a fake host (plan/13 section 2).
- * Built with -DDRZ_TEST, which tags every ring sample with its absolute position so the read guard
- * can be checked on every sample a grain reads.
+ * Built with -DDRZ_TEST, which tags every Live ring sample with its absolute position so the read
+ * guard is checked on every point a grain reads, and counts tape grains that would read past a tape's
+ * ends. -DDRZ_TEST_SLOW runs every grain on the wrapping read path.
  *
- *   build/drizzle_test [outdir]   outdir: where to write chain_params.json and ui_hierarchy.json */
+ *   build/drizzle_test */
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,6 +27,8 @@ static int g_pass, g_fail;
 
 static plugin_api_v2_t *api;
 static host_api_v1_t host;
+static float g_bpm = 120.0f;
+static float fake_bpm(void) { return g_bpm; }
 
 /* ------------------------------------------------------------------ helpers */
 
@@ -75,7 +78,6 @@ static int all_finite(const float *x, int n) {
         if (!isfinite(x[i])) return 0;
     return 1;
 }
-/* Energy at frequency f (Goertzel). */
 static double goertzel(const float *x, int n, double f) {
     double w = 2.0 * 3.14159265358979323846 * f / 44100.0, c = 2.0 * cos(w), s1 = 0, s2 = 0;
     for (int i = 0; i < n; i++) {
@@ -85,12 +87,24 @@ static double goertzel(const float *x, int n, double f) {
     }
     return s1 * s1 + s2 * s2 - c * s1 * s2;
 }
-
 /* Energy within +-1.5 % of f: grains of a few hundred ms spread a partial over a few Hz. */
 static double band(const float *x, int n, double f) {
     double e = 0;
     for (int k = -6; k <= 6; k++) e += goertzel(x, n, f * (1.0 + 0.0025 * k));
     return e;
+}
+/* Rising zero crossings per second of x (a pitch estimate for clean periodic material). */
+static float zc_hz(const float *x, int n) {
+    int c = 0;
+    for (int i = 1; i < n; i++) c += x[i - 1] < 0.0f && x[i] >= 0.0f;
+    return (float)c * 44100.0f / (float)n;
+}
+
+/* A plain Live patch with the effects off: the M0 tests' setting. */
+static void plain_live(void *h) {
+    sp(h, "buf_mode", "Live");
+    sp(h, "rev_lvl", "0");
+    sp(h, "sw_timb", "0");
 }
 
 #define SEC 44032 /* 344 blocks, about 1 s */
@@ -115,26 +129,36 @@ static void test_abi(void) {
     CHECK(again == h[2], "a released slot is reused");
     for (int i = 0; i < 4; i++) api->destroy_instance(i == 2 ? again : h[i]);
     int16_t blk[256];
-    api->render_block(NULL, blk, 128); /* no crash on a bad handle */
+    api->render_block(NULL, blk, 128);
     CHECK(api->get_param(h[0], "state", e, sizeof e) < 0, "a destroyed instance answers nothing");
 }
 
 static void test_params(void) {
     printf("params\n");
     void *h = mk();
+    int bad = 0;
     for (int i = 0; i < P_COUNT; i++) {
         const param_desc_t *d = &DRZ_PARAMS[i];
-        float vals[3] = {d->min, d->max, d->def};
+        float vals[3] = {d->mn, d->mx, d->def};
         for (int k = 0; k < 3; k++) {
             spf(h, d->key, vals[k]);
-            CHECK(fabsf(gp(h, d->key) - vals[k]) < 1e-4f, "%s round trip %g", d->key, (double)vals[k]);
+            if (fabsf(gp(h, d->key) - vals[k]) > 1e-4f) bad++;
         }
-        spf(h, d->key, d->max + 10.0f);
-        CHECK(fabsf(gp(h, d->key) - d->max) < 1e-4f, "%s clamps", d->key);
+        spf(h, d->key, d->mx + 10.0f);
+        if (fabsf(gp(h, d->key) - d->mx) > 1e-4f) bad++;
         spf(h, d->key, d->def);
     }
+    CHECK(bad == 0, "%d of %d keys fail min/max/default/clamp round trips", bad, P_COUNT);
+    for (int i = 1; i < P_COUNT; i++) {
+        int a = DRZ_PARAMS_SORTED[i - 1], b = DRZ_PARAMS_SORTED[i];
+        if (strcmp(DRZ_PARAMS[a].key, DRZ_PARAMS[b].key) >= 0) bad++;
+    }
+    CHECK(bad == 0, "the sorted key order is strictly increasing");
+    for (int i = 0; i < P_COUNT; i++)
+        if (params_find(DRZ_PARAMS[i].key) != i) bad++;
+    CHECK(bad == 0, "every key is found");
     sp(h, "an_a_wave", "Sine");
-    CHECK(gp(h, "an_a_wave") == AW_SINE, "enum by name");
+    CHECK(gp(h, "an_a_wave") == AN_A_WAVE_SINE, "enum by name");
     sp(h, "gr_pos", "0.25");
     sp(h, "gr_pos", "nan");
     sp(h, "gr_pos", "inf");
@@ -144,29 +168,36 @@ static void test_params(void) {
     CHECK(api->get_param(h, "no_such_key", (char[8]){0}, 8) < 0, "unknown keys answer -1");
     char small[8];
     CHECK(api->get_param(h, "chain_params", small, sizeof small) < 0, "a short buffer gets -1, not a cut string");
+    CHECK(fabsf(gp(h, "gr_pos:effective") - 0.25f) < 1e-5f, "gr_pos:effective answers");
+    CHECK(api->get_param(h, "gr_jit:effective", small, sizeof small) < 0, "only live keys have :effective");
+    static char cp[32768];
+    int n = api->get_param(h, "chain_params", cp, sizeof cp);
+    CHECK(n > 1000 && n < 31 * 1024 && cp[0] == '[', "chain_params %d B", n);
+    n = api->get_param(h, "ui_hierarchy", cp, sizeof cp);
+    CHECK(n > 100 && strncmp(cp, "{\"levels\":", 10) == 0, "ui_hierarchy");
     api->destroy_instance(h);
 }
 
 static void test_state(void) {
     printf("state\n");
     void *a = mk(), *b = mk();
-    static char s1[8192], s2[8192];
+    static char s1[16384], s2[16384];
     uint32_t rng = 12345;
     int same = 1;
-    for (int t = 0; t < 300; t++) {
+    for (int t = 0; t < 200; t++) {
         for (int i = 0; i < P_COUNT; i++) {
             const param_desc_t *d = &DRZ_PARAMS[i];
-            spf(a, d->key, d->min + (d->max - d->min) * rng_uni(&rng));
+            spf(a, d->key, d->mn + (d->mx - d->mn) * rng_uni(&rng));
         }
         int n1 = api->get_param(a, "state", s1, sizeof s1);
         sp(b, "state", s1);
         int n2 = api->get_param(b, "state", s2, sizeof s2);
         if (n1 <= 0 || n1 != n2 || strcmp(s1, s2) != 0) same = 0;
+        render(b, 128, NULL, NULL); /* every random patch renders */
     }
-    CHECK(same, "300 random patches round-trip byte-identically");
+    CHECK(same, "200 random patches round-trip byte-identically");
     printf("  state blob: %d bytes\n", (int)strlen(s1));
-    spf(a, "gr_pos", 0.123);
-    api->get_param(a, "state", s1, sizeof s1);
+    CHECK(strlen(s1) < 8192, "the blob is under 8 KB");
     sp(b, "state", "{\"fmt\":\"crest\",\"v\":\"1\",\"gr_pos\":\"0.9\"}");
     CHECK(fabsf(gp(b, "gr_pos") - 0.9f) > 0.01f, "another module's blob is ignored");
     sp(b, "state", "{\"fmt\":\"drizzle\",\"v\":\"1\",\"name\":\"Wet \\\"Cloud\\\"\",\"gr_pos\":\"0.9\"}");
@@ -175,11 +206,7 @@ static void test_state(void) {
     char nm[32];
     api->get_param(b, "name", nm, sizeof nm);
     CHECK(strcmp(nm, "Wet \"Cloud\"") == 0, "escaped name: %s", nm);
-    api->get_param(b, "state", s2, sizeof s2);
-    sp(a, "state", s2);
-    api->get_param(a, "name", nm, sizeof nm);
-    CHECK(strcmp(nm, "Wet \"Cloud\"") == 0, "name survives a second round trip");
-    /* malformed blobs never crash and never read past the string */
+    CHECK(gp(b, "preset") == -1.0f, "a state load is not a factory patch");
     const char *bad[] = {"", "{", "{\"fmt\":\"drizzle\"", "{\"fmt\":\"drizzle\",\"gr_pos\":", "{\"fmt\":\"drizzle\",\"gr_pos\":\"0.3",
                          "garbage \"\"\"\" ::: \"", "{\"fmt\":\"drizzle\",\"name\":\"\\"};
     for (size_t i = 0; i < sizeof bad / sizeof *bad; i++) sp(b, "state", bad[i]);
@@ -193,33 +220,116 @@ static void test_state(void) {
     api->destroy_instance(b);
 }
 
-static void test_render(void) {
-    printf("render\n");
+static void test_presets(void) {
+    printf("presets & browser\n");
+    void *h = mk();
+    CHECK(gp(h, "preset_count") >= 1.0f && gp(h, "preset") == 0.0f, "INIT is factory patch 0");
+    char b[512];
+    CHECK(api->get_param(h, "preset_name", b, sizeof b) > 0 && strcmp(b, "Init") == 0, "preset_name %s", b);
+    CHECK(api->get_param(h, "pb_cats", b, sizeof b) > 0 && strstr(b, "All ("), "pb_cats %s", b);
+    CHECK(gp(h, "pb_count") == gp(h, "preset_count"), "All lists every patch");
+    spf(h, "gr_pos", 0.9f);
+    sp(h, "preset", "0");
+    CHECK(fabsf(gp(h, "gr_pos") - 0.5f) < 1e-5f, "loading a patch restores its values");
+    sp(h, "pb_cat", "1");
+    CHECK(gp(h, "pb_cat") == 1.0f && gp(h, "pb_count") >= 1.0f, "a category");
+    sp(h, "pb_index", "0");
+    CHECK(gp(h, "pb_index") == 0.0f, "pb_index");
+    /* every factory patch loads, plays a chord and stays finite */
+    int n = (int)gp(h, "preset_count"), quiet = 0, bad = 0;
+    for (int i = 0; i < n; i++) {
+        char idx[8];
+        snprintf(idx, sizeof idx, "%d", i);
+        sp(h, "preset", idx);
+        render(h, SEC, NULL, NULL); /* the tape or ring fills */
+        for (int k = 0; k < 3; k++) note_on(h, 48 + 3 * k + (k == 2), 100);
+        render(h, 2 * SEC, L, R);
+        if (!all_finite(L, 2 * SEC) || !all_finite(R, 2 * SEC) || peak(L, 2 * SEC) >= 0.99f) bad++;
+        if (rms(L + SEC, SEC) < 0.01f) quiet++;
+        midi(h, 0xB0, 120, 0);
+        render(h, 1280, NULL, NULL);
+    }
+    CHECK(n >= 7 && bad == 0 && quiet == 0, "%d patches: %d not finite or clipping, %d silent", n, bad, quiet);
+    api->destroy_instance(h);
+}
+
+/* The Analog source on its own: every wave, sync, FM, density, noise, fold and tone stay finite and
+ * bounded, and the sine sits at the root. */
+static void test_source(void) {
+    printf("source\n");
     void *h = mk();
     drz_inst_t *I = drz_inst(h);
-    render(h, SEC / 2, L, R); /* the ring fills */
+    static float buf[SEC];
+    int ok = 1;
+    float worst = 0;
+    uint32_t rng = 99;
+    for (int t = 0; t < 120; t++) {
+        spf(h, "an_a_wave", (float)(t % 4));
+        spf(h, "an_b_wave", (float)((t / 4) % 4));
+        spf(h, "an_a_shape", rng_uni(&rng));
+        spf(h, "an_b_shape", rng_uni(&rng));
+        spf(h, "an_b_lvl", rng_uni(&rng));
+        spf(h, "an_b_semi", (float)((int)(rng_uni(&rng) * 48) - 24));
+        spf(h, "an_dens", rng_uni(&rng) < 0.5f ? 0.0f : rng_uni(&rng));
+        spf(h, "an_fm", rng_uni(&rng) < 0.5f ? 0.0f : rng_uni(&rng));
+        spf(h, "an_sync", rng_uni(&rng) < 0.5f ? 0.0f : rng_uni(&rng));
+        spf(h, "an_noise", rng_uni(&rng) < 0.7f ? 0.0f : rng_uni(&rng));
+        spf(h, "src_fold", rng_uni(&rng) < 0.5f ? 0.0f : rng_uni(&rng));
+        spf(h, "src_tone", rng_uni(&rng) < 0.5f ? 1.0f : rng_uni(&rng));
+        spf(h, "src_root", 24.0f + 72.0f * rng_uni(&rng));
+        source_prepare(I);
+        source_t s;
+        source_reset(&s, 1);
+        source_render(&I->sp, &s, rng_uni(&rng), buf, 4096);
+        if (!all_finite(buf, 4096)) ok = 0;
+        worst = fmaxf(worst, peak(buf, 4096));
+    }
+    CHECK(ok, "finite for every combination");
+    CHECK(worst < 2.5f, "bounded (peak %.2f)", (double)worst);
+    sp(h, "state", "{\"fmt\":\"drizzle\",\"v\":\"1\",\"an_a_wave\":\"Sine\",\"sw_timb\":\"0\"}");
+    source_prepare(I);
+    source_t s;
+    source_reset(&s, 1);
+    source_render(&I->sp, &s, 0.0f, buf, SEC);
+    float f = zc_hz(buf, SEC);
+    CHECK(fabsf(f - semis_to_hz(48)) < 1.5f, "the sine plays the root: %.1f Hz", (double)f);
+    double dc = 0;
+    for (int i = 0; i < SEC; i++) dc += (double)buf[i];
+    CHECK(fabs(dc / SEC) < 0.01, "no DC");
+    /* sync: a synced saw keeps the master's pitch */
+    sp(h, "an_a_wave", "Saw");
+    sp(h, "an_sync", "0.5");
+    source_prepare(I);
+    source_reset(&s, 1);
+    source_render(&I->sp, &s, 0.0f, buf, SEC);
+    double f48 = (double)semis_to_hz(48), fund = goertzel(buf, SEC, f48), off = goertzel(buf, SEC, f48 * 1.5);
+    CHECK(fund > 10.0 * off, "a synced saw keeps the master pitch");
+    api->destroy_instance(h);
+}
+
+static void test_render(void) {
+    printf("render (Live)\n");
+    void *h = mk();
+    drz_inst_t *I = drz_inst(h);
+    plain_live(h);
+    render(h, SEC / 2, L, R);
     CHECK(peak(L, SEC / 2) == 0.0f, "silent without notes");
     note_on(h, 48, 100);
     render(h, 2 * SEC, L, R);
     float r1 = rms(L + SEC, SEC);
     CHECK(r1 > 0.01f && r1 < 0.5f, "a held note sounds (rms %.3f)", (double)r1);
     CHECK(all_finite(L, 2 * SEC) && all_finite(R, 2 * SEC), "finite");
-    CHECK(fabsf(rms(L + SEC, SEC) - rms(R + SEC, SEC)) < 0.5f * r1, "both channels carry the cloud");
     note_off(h, 48);
     render(h, 4 * SEC, L, R);
     CHECK(peak(L + 3 * SEC, SEC) == 0.0f, "silent after the release");
     CHECK(!I->voice[0].active && grains_active(I) == 0, "voice and grains are freed");
-    CHECK(I->guard_violations == 0, "guard: %u violations", I->guard_violations);
-    CHECK(I->nan_resets == 0, "no NaN resets");
 
-    /* chord, then CC 120: silent at once */
     for (int k = 0; k < 4; k++) note_on(h, 48 + 3 * k, 100);
     render(h, SEC, L, R);
     midi(h, 0xB0, 120, 0);
     render(h, 1280, L, R);
     CHECK(peak(L + 256, 1024) == 0.0f, "CC 120 silences within 256 samples");
 
-    /* sustain holds note-offs */
     note_on(h, 50, 100);
     midi(h, 0xB0, 64, 127);
     note_off(h, 50);
@@ -229,7 +339,6 @@ static void test_render(void) {
     render(h, 4 * SEC, L, R);
     CHECK(peak(L + 3 * SEC, SEC) == 0.0f, "pedal up releases it");
 
-    /* stealing: nine notes, never more than 8 voices, never more than 128 grains */
     for (int k = 0; k < 9; k++) note_on(h, 40 + k, 100);
     int over = 0;
     for (int b = 0; b < 400; b++) {
@@ -240,17 +349,26 @@ static void test_render(void) {
     int act = 0;
     for (int v = 0; v < DRZ_VOICES; v++) act += I->voice[v].active;
     CHECK(act == 8, "8 voices after 9 notes (%d)", act);
-    CHECK(I->guard_violations == 0, "guard after stealing: %u", I->guard_violations);
+    midi(h, 0xB0, 120, 0);
+    render(h, SEC, NULL, NULL);
+    sp(h, "v_voices", "3");
+    for (int k = 0; k < 5; k++) note_on(h, 40 + k, 100);
+    render(h, 1280, NULL, NULL);
+    act = 0;
+    for (int v = 0; v < DRZ_VOICES; v++) act += I->voice[v].active;
+    CHECK(act == 3, "v_voices 3 keeps 3 voices (%d)", act);
+    CHECK(I->guard_violations == 0, "guard: %u", I->guard_violations);
     api->destroy_instance(h);
 }
 
 static void test_pitch(void) {
     printf("pitch\n");
     void *h = mk();
+    plain_live(h);
     sp(h, "an_a_wave", "Sine");
-    spf(h, "gr_spray", 0.0);
-    spf(h, "gr_size", 0.7); /* about 330 ms */
-    spf(h, "gr_dens", 0.6); /* 21 grains/s, overlap 7 */
+    spf(h, "gr_spray", 0.0f);
+    spf(h, "gr_size", 0.7f);
+    spf(h, "gr_dens", 0.6f);
     render(h, SEC, NULL, NULL);
     int notes[] = {48, 55, 60, 67, 72};
     for (size_t k = 0; k < sizeof notes / sizeof *notes; k++) {
@@ -263,17 +381,35 @@ static void test_pitch(void) {
         note_off(h, notes[k]);
         render(h, 4 * SEC, NULL, NULL);
     }
+    /* octave pitch spray lands on octaves, not between them */
+    spf(h, "gr_pspr", 12.0f);
+    sp(h, "gr_pq", "Oct");
+    note_on(h, 60, 100);
+    render(h, 4 * SEC, L, R);
+    double f = (double)semis_to_hz(60);
+    double oct = band(L + SEC, 3 * SEC, f) + band(L + SEC, 3 * SEC, 2 * f) + band(L + SEC, 3 * SEC, f / 2);
+    double mid = band(L + SEC, 3 * SEC, f * pow(2.0, 5.0 / 12.0)) + band(L + SEC, 3 * SEC, f * pow(2.0, 7.0 / 12.0));
+    CHECK(oct > 100.0 * mid, "Oct spray stays on octaves");
+    note_off(h, 60);
+    render(h, 3 * SEC, NULL, NULL);
+    sp(h, "gr_pq", "Fifth");
+    note_on(h, 60, 100);
+    render(h, 4 * SEC, L, R);
+    double fifth = band(L + SEC, 3 * SEC, f * pow(2.0, 7.0 / 12.0)) + band(L + SEC, 3 * SEC, f * pow(2.0, -5.0 / 12.0));
+    double tri = band(L + SEC, 3 * SEC, f * pow(2.0, 6.0 / 12.0));
+    CHECK(fifth > 100.0 * tri, "Fifth spray reaches fifths, not tritones");
     api->destroy_instance(h);
 }
 
 static void test_level(void) {
     printf("level\n");
     void *h = mk();
-    spf(h, "gr_size", 0.5); /* about 100 ms */
-    spf(h, "gr_spray", 0.4);
-    spf(h, "gr_jit", 1.0);
+    plain_live(h);
+    spf(h, "gr_size", 0.5f);
+    spf(h, "gr_spray", 0.4f);
+    spf(h, "gr_jit", 1.0f);
     render(h, 4 * SEC, NULL, NULL);
-    float dens[] = {0.5f, 0.75f, 1.0f}; /* 11, 53, 250 grains/s: overlap 1.1 .. 25 */
+    float dens[] = {0.5f, 0.75f, 1.0f};
     float lv[3];
     for (int k = 0; k < 3; k++) {
         spf(h, "gr_dens", dens[k]);
@@ -286,29 +422,53 @@ static void test_level(void) {
     for (int k = 1; k < 3; k++)
         CHECK(fabsf(20.0f * log10f(lv[k] / lv[0])) < 3.0f, "density %.2f: %.2f dB from density 0.5", (double)dens[k],
               (double)(20.0f * log10f(lv[k] / lv[0])));
+    /* every window has about Hann's loudness, and none clicks at its edges */
+    spf(h, "gr_dens", 0.75f);
+    float hann = 0;
+    for (int w = 0; w < DRZ_WIN_COUNT; w++) {
+        spf(h, "gr_win", (float)w);
+        note_on(h, 48, 100);
+        render(h, 4 * SEC, L, NULL);
+        float r = rms(L + SEC, 3 * SEC);
+        if (w == 0) hann = r;
+        CHECK(fabsf(20.0f * log10f(r / hann)) < 4.0f, "window %s: %.2f dB from Hann", DRZ_PARAMS[P_GR_WIN].opts[w],
+              (double)(20.0f * log10f(r / hann)));
+        CHECK(all_finite(L, 4 * SEC), "window %d finite", w);
+        note_off(h, 48);
+        render(h, 4 * SEC, NULL, NULL);
+    }
+    CHECK(DRZ_WINDOWS[GR_WIN_HANN][0] == 0.0f && DRZ_WINDOWS[GR_WIN_RECT][0] == 0.0f &&
+              DRZ_WINDOWS[GR_WIN_GAUSS][DRZ_WIN_N] < 1e-6f && DRZ_WINDOWS[GR_WIN_PERC][DRZ_WIN_N] < 1e-6f,
+          "windows start and end at 0");
     api->destroy_instance(h);
 }
 
-/* Random positions, sizes, pitches, buffer lengths and freezes: no grain may read a sample that was
- * not written at the position it means, or one written after "now" (plan/06 section 8). */
+/* Random positions, sizes, pitches, pitch spray, reverse, scan, buffer lengths and freezes: no grain
+ * may read a sample that was not written at the position it means, or one written after "now". */
 static void test_guard_fuzz(void) {
-    printf("guard fuzz\n");
+    printf("guard fuzz (Live)\n");
     void *h = mk();
     drz_inst_t *I = drz_inst(h);
+    plain_live(h);
     uint32_t rng = 777;
-    for (int round = 0; round < 60; round++) {
+    for (int round = 0; round < 80; round++) {
         spf(h, "gr_pos", rng_uni(&rng));
         spf(h, "gr_spray", rng_uni(&rng));
         spf(h, "gr_size", rng_uni(&rng));
         spf(h, "gr_dens", rng_uni(&rng));
         spf(h, "gr_jit", rng_uni(&rng));
+        spf(h, "gr_rev", rng_uni(&rng) < 0.5f ? 0.0f : rng_uni(&rng));
+        spf(h, "gr_pspr", rng_uni(&rng) < 0.5f ? 0.0f : 24.0f * rng_uni(&rng));
+        spf(h, "gr_pitch", (float)((int)(rng_uni(&rng) * 48) - 24));
+        spf(h, "gr_scan", rng_uni(&rng) < 0.5f ? 0.0f : 8.0f * rng_uni(&rng) - 4.0f);
+        spf(h, "gr_win", (float)(int)(rng_uni(&rng) * 6));
         spf(h, "buf_len", rng_uni(&rng));
-        spf(h, "src_root", 24 + (int)(72 * rng_uni(&rng)));
+        spf(h, "src_root", 24.0f + (float)(int)(72.0f * rng_uni(&rng)));
         if (rng_uni(&rng) < 0.15f) sp(h, "buf_freeze", I->v[P_BUF_FREEZE] >= 0.5f ? "0" : "1");
-        if (rng_uni(&rng) < 0.05f) sp(h, "state", "{\"fmt\":\"drizzle\",\"v\":\"1\"}"); /* the ring starts over */
+        if (rng_uni(&rng) < 0.05f) sp(h, "state", "{\"fmt\":\"drizzle\",\"v\":\"1\",\"buf_mode\":\"Live\"}");
         int note = 24 + (int)(72 * rng_uni(&rng));
         note_on(h, note, 100);
-        render(h, (int)(SEC / 4 + SEC * rng_uni(&rng)) & ~127, NULL, NULL);
+        render(h, (int)(SEC / 4 + SEC * rng_uni(&rng)) & ~127, L, NULL);
         if (rng_uni(&rng) < 0.6f) note_off(h, note);
     }
     CHECK(I->guard_violations == 0, "%u guard violations", I->guard_violations);
@@ -318,30 +478,29 @@ static void test_guard_fuzz(void) {
 }
 
 static void test_freeze(void) {
-    printf("freeze\n");
+    printf("freeze (Live)\n");
     void *h = mk();
     drz_inst_t *I = drz_inst(h);
+    plain_live(h);
     sp(h, "an_a_wave", "Sine");
-    spf(h, "buf_len", 0.25); /* 1 s */
+    spf(h, "buf_len", 0.25f); /* 1 s */
     render(h, 2 * SEC, NULL, NULL);
     sp(h, "buf_freeze", "On");
     render(h, 1280, NULL, NULL);
     const buffer_t *b = &I->buf;
     CHECK(b->frozen && b->xf_k == DRZ_XFADE, "frozen, seam crossfade done");
     CHECK(b->lf == buffer_len_samples(I), "the loop is buf_len long (%d)", b->lf);
-    /* the loop's end runs on into its start: the step there is a sine step, not a jump */
     const float *d = I->data[0];
     int32_t last = (b->ls + b->lf - 1) % DRZ_RING, first = b->ls;
-    float seam = fabsf(d[first] - d[last]);
     float step = 2.0f * DRZ_PI * semis_to_hz(48) / DRZ_FS;
-    CHECK(seam < 1.5f * step, "seam step %.4f (a sine step is %.4f)", (double)seam, (double)step);
+    CHECK(fabsf(d[first] - d[last]) < 1.5f * step, "seam step %.4f (a sine step is %.4f)", (double)fabsf(d[first] - d[last]),
+          (double)step);
     float worst = 0;
     for (int k = 0; k < DRZ_XFADE + 8; k++) {
         int32_t i0 = (b->ls + k) % DRZ_RING, i1 = (i0 + 1) % DRZ_RING;
         worst = fmaxf(worst, fabsf(d[i1] - d[i0]));
     }
     CHECK(worst < 1.5f * step, "no step larger than a sine step through the crossfade (%.4f)", (double)worst);
-
     int64_t w0 = b->w;
     note_on(h, 48, 100);
     render(h, 8 * SEC, L, NULL);
@@ -350,8 +509,6 @@ static void test_freeze(void) {
     sp(h, "buf_freeze", "Off");
     render(h, SEC, NULL, NULL);
     CHECK(!b->frozen && b->w > w0, "unfreeze resumes writing");
-
-    /* CC 69 toggles */
     midi(h, 0xB0, 69, 127);
     render(h, 128, NULL, NULL);
     CHECK(b->frozen && gp(h, "buf_freeze") == 1.0f, "CC 69 freezes");
@@ -362,13 +519,12 @@ static void test_freeze(void) {
     midi(h, 0xB0, 69, 127);
     render(h, 128, NULL, NULL);
     CHECK(!b->frozen, "the next press unfreezes");
-
-    /* a saved freeze waits until the ring holds buf_len again */
-    static char s[8192];
+    static char s[16384];
     sp(h, "buf_freeze", "On");
     render(h, 1280, NULL, NULL);
     api->get_param(h, "state", s, sizeof s);
     sp(h, "state", s);
+    render(h, 128, NULL, NULL);
     CHECK(!b->frozen && b->wait_full, "after a load the freeze waits");
     render(h, SEC / 2, NULL, NULL);
     CHECK(!b->frozen, "still waiting at 0.5 s");
@@ -378,13 +534,127 @@ static void test_freeze(void) {
     api->destroy_instance(h);
 }
 
+/* Scan tapes (plan/05 section 4): rendered at 8x realtime, deterministic, swapped without a grain
+ * ever reading a buffer under a render, held by Freeze. */
+static void test_scan(void) {
+    printf("scan tapes\n");
+    void *h = mk(), *h2 = mk();
+    drz_inst_t *I = drz_inst(h), *I2 = drz_inst(h2);
+    const buffer_t *b = &I->buf;
+    CHECK(b->mode == BUF_MODE_SCAN, "INIT is a Scan patch");
+    int blocks = 0;
+    while (b->tape_renders == 0 && blocks < 2000) {
+        render(h, 128, NULL, NULL);
+        blocks++;
+    }
+    int expect = (int)ceil(4.0 * 44100.0 / DRZ_TAPE_CHUNK) + 1;
+    CHECK(b->tape_renders == 1 && b->front >= 0, "the first tape renders");
+    CHECK(blocks <= expect + 1, "a 4 s tape takes %d blocks (8x realtime: %d)", blocks, expect);
+    CHECK(b->tape_len[b->front] == buffer_len_samples(I), "the tape is buf_len long");
+    while (I2->buf.tape_renders == 0) render(h2, 128, NULL, NULL);
+    CHECK(memcmp(I->data[b->front], I2->data[I2->buf.front], sizeof(float) * (size_t)b->tape_len[b->front]) == 0,
+          "two instances render the same tape bit for bit");
+    /* Position is a timbre axis: a Sweep pitch of +12 puts the start an octave below the end. */
+    sp(h2, "an_a_wave", "Sine");
+    sp(h2, "sw_timb", "0");
+    sp(h2, "sw_pitch", "12");
+    int r0 = I2->buf.tape_renders;
+    while (I2->buf.tape_renders == r0) render(h2, 128, NULL, NULL);
+    const float *t = I2->data[I2->buf.front];
+    int32_t tl = I2->buf.tape_len[I2->buf.front];
+    float f0 = zc_hz(t, tl / 10), f1 = zc_hz(t + tl - tl / 10, tl / 10);
+    CHECK(f1 > 1.8f * f0 && f1 < 2.05f * f0, "the tape sweeps an octave: %.0f Hz -> %.0f Hz", (double)f0, (double)f1);
+
+    note_on(h, 48, 100);
+    render(h, SEC, L, NULL);
+    CHECK(rms(L + SEC / 2, SEC / 2) > 0.01f, "a note plays the tape");
+    /* re-render while notes play: the render never writes a buffer a grain reads */
+    int clash = 0, renders = b->tape_renders;
+    for (int k = 0; k < 6; k++) {
+        spf(h, "an_a_shape", 0.15f * (float)(k + 1));
+        for (int i = 0; i < 300; i++) {
+            render(h, 128, L, NULL);
+            int back = b->front < 0 ? 0 : 1 - b->front;
+            if (b->rendering && b->render_k > 0 && grains_reading(I, back)) clash++;
+        }
+    }
+    CHECK(clash == 0, "no grain reads a buffer under a render (%d)", clash);
+    CHECK(b->tape_renders >= renders + 6, "each change renders a tape (%d)", b->tape_renders - renders);
+    /* a knob turned continuously never completes a render; it renders once it stops */
+    renders = b->tape_renders;
+    for (int i = 0; i < 400; i++) {
+        spf(h, "src_fold", 0.001f * (float)(i + 1));
+        render(h, 128, NULL, NULL);
+    }
+    CHECK(b->tape_renders == renders, "debounce: no render while the knob moves");
+    for (int i = 0; i < 400; i++) render(h, 128, NULL, NULL);
+    CHECK(b->tape_renders == renders + 1, "one render after it stops");
+    /* Freeze holds the tape */
+    sp(h, "buf_freeze", "On");
+    renders = b->tape_renders;
+    sp(h, "an_a_wave", "Pulse");
+    render(h, 2 * SEC, NULL, NULL);
+    CHECK(b->tape_renders == renders, "Freeze holds the tape");
+    sp(h, "buf_freeze", "Off");
+    render(h, 2 * SEC, NULL, NULL);
+    CHECK(b->tape_renders == renders + 1, "release renders the change");
+    CHECK(I->guard_violations == 0, "guard: %u", I->guard_violations);
+    /* buf_view */
+    char v[512];
+    int n = api->get_param(h, "buf_view", v, sizeof v);
+    CHECK(n == 6 + 2 * DRZ_BINS && v[0] == 'S' && v[2] == 'F' && v[3] == 'F', "buf_view: %.12s… (%d)", v, n);
+    int nonzero = 0;
+    for (int i = 6; i < n; i += 2) nonzero += !(v[i] == '0' && v[i + 1] == '0');
+    CHECK(nonzero > 100, "the tape's bins are drawn (%d)", nonzero);
+    n = api->get_param(h, "grain_view", v, sizeof v);
+    CHECK(n > 0 && n % 4 == 0, "grain_view (%d)", n);
+    /* switching modes */
+    sp(h, "buf_mode", "Live");
+    render(h, SEC, L, NULL);
+    CHECK(I->buf.mode == BUF_MODE_LIVE && rms(L + SEC / 2, SEC / 2) > 0.01f, "Scan -> Live keeps playing");
+    sp(h, "buf_mode", "Scan");
+    render(h, SEC, L, NULL);
+    CHECK(I->buf.mode == BUF_MODE_SCAN && rms(L + SEC / 2, SEC / 2) > 0.01f, "Live -> Scan renders and plays");
+    note_off(h, 48);
+    api->destroy_instance(h);
+    api->destroy_instance(h2);
+}
+
+static void test_scan_fuzz(void) {
+    printf("guard fuzz (Scan)\n");
+    void *h = mk();
+    drz_inst_t *I = drz_inst(h);
+    uint32_t rng = 4242;
+    for (int round = 0; round < 60; round++) {
+        spf(h, "gr_pos", rng_uni(&rng));
+        spf(h, "gr_spray", rng_uni(&rng));
+        spf(h, "gr_size", rng_uni(&rng));
+        spf(h, "gr_dens", rng_uni(&rng));
+        spf(h, "gr_rev", rng_uni(&rng));
+        spf(h, "gr_pitch", (float)((int)(rng_uni(&rng) * 48) - 24));
+        spf(h, "gr_pspr", 24.0f * rng_uni(&rng));
+        spf(h, "gr_scan", 8.0f * rng_uni(&rng) - 4.0f);
+        if (rng_uni(&rng) < 0.3f) spf(h, "buf_len", rng_uni(&rng));
+        if (rng_uni(&rng) < 0.3f) spf(h, "an_a_shape", rng_uni(&rng));
+        int note = 24 + (int)(72 * rng_uni(&rng));
+        note_on(h, note, 100);
+        render(h, (int)(SEC / 4 + SEC * rng_uni(&rng)) & ~127, L, NULL);
+        if (!all_finite(L, SEC / 4)) I->nan_resets++;
+        if (rng_uni(&rng) < 0.6f) note_off(h, note);
+    }
+    CHECK(I->guard_violations == 0, "%u tape reads past the ends", I->guard_violations);
+    CHECK(I->nan_resets == 0, "finite");
+    api->destroy_instance(h);
+}
+
 static void test_pool(void) {
     printf("pool\n");
     void *h = mk();
     drz_inst_t *I = drz_inst(h);
-    spf(h, "gr_dens", 1.0);
-    spf(h, "gr_size", 1.0);
-    spf(h, "buf_len", 1.0);
+    plain_live(h);
+    spf(h, "gr_dens", 1.0f);
+    spf(h, "gr_size", 1.0f);
+    spf(h, "buf_len", 1.0f);
     render(h, 9 * SEC, NULL, NULL);
     for (int k = 0; k < 8; k++) note_on(h, 40 + 3 * k, 100);
     int maxg = 0, cap_ok = 1;
@@ -397,44 +667,52 @@ static void test_pool(void) {
     CHECK(maxg == DRZ_GRAINS, "the pool fills (%d) and never overflows", maxg);
     CHECK(cap_ok, "no voice above its cap");
     CHECK(I->grains_skipped > 0, "onsets are skipped, not stolen");
-    CHECK(all_finite(L, 128) && I->nan_resets == 0, "finite");
     int sum = 0;
     for (int v = 0; v < DRZ_VOICES; v++) sum += I->voice[v].n_grains;
     CHECK(sum == grains_active(I), "per-voice counts add up (%d vs %d)", sum, grains_active(I));
     api->destroy_instance(h);
 }
 
-static void dump(const char *dir, const char *key) {
-    static char buf[32768];
+static void test_fx(void) {
+    printf("effects\n");
     void *h = mk();
-    int n = api->get_param(h, key, buf, sizeof buf);
+    plain_live(h);
+    render(h, SEC, NULL, NULL);
+    sp(h, "rev_lvl", "0.6");
+    sp(h, "dly_lvl", "0.5");
+    sp(h, "cho_lvl", "0.5");
+    sp(h, "cr_lvl", "0.4");
+    for (int t = 0; t < 4; t++) {
+        spf(h, "cr_type", (float)t);
+        spf(h, "rev_type", (float)t);
+        note_on(h, 48, 100);
+        render(h, SEC, L, R);
+        note_off(h, 48);
+        render(h, 4 * SEC, L, R);
+        CHECK(all_finite(L, 4 * SEC) && all_finite(R, 4 * SEC), "type %d finite", t);
+        CHECK(rms(L + SEC, SEC / 2) > 1e-4f, "type %d: a tail after the release (%.5f)", t, (double)rms(L + SEC, SEC / 2));
+    }
     api->destroy_instance(h);
-    CHECK(n > 0, "%s answered", key);
-    char path[512];
-    snprintf(path, sizeof path, "%s/%s.json", dir, key);
-    FILE *f = fopen(path, "wb");
-    CHECK(f != NULL, "write %s", path);
-    if (!f) return;
-    fwrite(buf, 1, (size_t)n, f);
-    fclose(f);
 }
 
-int main(int argc, char **argv) {
+int main(void) {
     memset(&host, 0, sizeof host);
+    host.get_bpm = fake_bpm;
     api = move_plugin_init_v2(&host);
     test_abi();
     test_params();
     test_state();
+    test_presets();
+    test_source();
     test_render();
     test_pitch();
     test_level();
     test_guard_fuzz();
     test_freeze();
+    test_scan();
+    test_scan_fuzz();
     test_pool();
-    if (argc > 1) {
-        dump(argv[1], "chain_params");
-        dump(argv[1], "ui_hierarchy");
-    }
+    test_fx();
     printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

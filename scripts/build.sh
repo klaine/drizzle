@@ -2,31 +2,33 @@
 # Build Drizzle with zig cc: contract validation, native tests, the aarch64 dsp.so, its symbol
 # check and drizzle-module.tar.gz (plan/02 section 2). Run from anywhere:
 #
-#   scripts/build.sh            # contract + native tests + device build + package
+#   scripts/build.sh            # gen --check, contract, native tests, device build, package
+#   scripts/build.sh --gen      # run tools/gen/gen.py first (after editing params.py or presets)
 #   scripts/build.sh --no-test  # skip the tests
 #   scripts/build.sh --profile  # dsp.so with the read-only cpu_us key (render time, not for release)
 #   scripts/build.sh --bench    # also build and run the native CPU benchmark
 #   scripts/build.sh --render   # also write demo WAVs to build/demo
 #
-# M0: there is no codegen yet (tools/gen arrives at M1, with --gen and the gen --check step), no
-# web build and no golden tests. Needs zig (brew install zig, or pip install ziglang) and python3.
+# Needs zig (brew install zig, or pip install ziglang) and python3.
 # Set ZIG=/path/to/zig to override the lookup.
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
 
+GEN=0
 TEST=1
 PROFILE=0
 BENCH=0
 RENDER=0
 for arg in "$@"; do
   case "$arg" in
+    --gen) GEN=1 ;;
     --no-test) TEST=0 ;;
     --profile) PROFILE=1 ;;
     --bench) BENCH=1 ;;
     --render) RENDER=1 ;;
-    -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -56,13 +58,21 @@ DEFS=""
 [ "$PROFILE" = 1 ] && DEFS="-DDRZ_PROFILE"
 DSP_SRC=$(ls src/dsp/*.c)
 
+if [ "$GEN" = 1 ]; then
+  echo "== gen"
+  "$PY" tools/gen/gen.py
+else
+  "$PY" tools/gen/gen.py --check
+  "$PY" tools/gen/gen.py >/dev/null   # build/ is not committed: the contract and UI data for the checks
+fi
+
 if [ "$TEST" = 1 ]; then
   echo "== native tests"
   SAN="-fsanitize=undefined -fno-sanitize-recover=undefined"
   # -DDRZ_TEST tags every ring sample so the read guard is checked on every sample a grain reads.
   "$ZIG" cc -std=c11 -O1 -g $SAN $WARN $MATH -DDRZ_TEST -I src/dsp \
     -o "$BUILD/drizzle_test" $DSP_SRC tests/host/test_main.c -lm
-  "$BUILD/drizzle_test" "$BUILD"   # also writes build/chain_params.json and build/ui_hierarchy.json
+  "$BUILD/drizzle_test"
   # once more with every grain on the wrapping (slow) read path, so both paths stay tested
   "$ZIG" cc -std=c11 -O1 -g $SAN $WARN $MATH -DDRZ_TEST -DDRZ_TEST_SLOW -I src/dsp \
     -o "$BUILD/drizzle_test_slow" $DSP_SRC tests/host/test_main.c -lm
@@ -107,5 +117,9 @@ echo "== package"
 COPYFILE_DISABLE=1 tar -czf "$ROOT/drizzle-module.tar.gz" --numeric-owner --no-xattrs \
   --exclude '.DS_Store' --exclude '.gitkeep' -C "$ROOT/modules/sound_generators" drizzle
 
-ls -l "$MODULE/dsp.so" "$ROOT/drizzle-module.tar.gz"
-echo "built $ROOT/drizzle-module.tar.gz"
+[ "$TEST" = 1 ] && WEBARGS="" || WEBARGS="--no-test"
+ZIG="$ZIG" PYTHON="$PY" sh scripts/build_web.sh $WEBARGS   # build/site and build/drizzle.html
+sh scripts/pages.sh   # build/drizzle.html as index.html on the local pages branch (push: scripts/pages.sh --push)
+
+ls -l "$MODULE/dsp.so" "$ROOT/drizzle-module.tar.gz" "$BUILD/drizzle.html"
+echo "built $ROOT/drizzle-module.tar.gz and $BUILD/drizzle.html"

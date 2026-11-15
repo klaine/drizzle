@@ -69,8 +69,11 @@ on are the first thing under the hands.
 │ Pos 0.42  Spray 0.18  Dens 24/s        │
 └────────────────────────────────────────┘
 ```
-- Data from `buf_view` (128 bins + head + flags) and `grain_view` (up to 32 grains), polled by the
-  canvas. **VERIFY** the poll rate and that ~300-byte answers are cheap enough at that rate; fall
+- Data from `buf_view` and `grain_view`, polled by the canvas. `buf_view` is hex: mode (`L` or `S`),
+  frozen (`0`/`1`), tape-render progress (two digits, `FF` = none), head position (two digits), then
+  128 bins of peak level (two digits each, oldest first in Live): 262 characters. `grain_view` is
+  four hex digits per live grain (up to 32): position along the readable range and the window's
+  current level. **VERIFY** the poll rate and that ~300-byte answers are cheap enough at that rate; fall
   back to bins every 4th frame.
 - In Live the picture scrolls with the head; frozen, it stops and shows the snowflake.
 - During a tape render a progress line runs under the header.

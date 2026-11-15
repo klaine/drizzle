@@ -1,6 +1,8 @@
-/* Render a few demo WAVs (16-bit stereo, 44.1 kHz) for listening: build/drizzle_render <outdir>.
- * M0 has no factory bank yet, so these are hand-set patches of the M0 parameters. */
+/* Render one demo WAV (16-bit stereo, 44.1 kHz) per factory patch for listening:
+ * build/drizzle_render <outdir>. A C minor chord builds up over two seconds, holds, and is released. */
+#include <ctype.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "drizzle.h"
@@ -67,47 +69,26 @@ int main(int argc, char **argv) {
     memset(&host, 0, sizeof host);
     api = move_plugin_init_v2(&host);
     int16_t out[256];
-
-    /* INIT: a C minor chord on the saw cloud, then the release. */
     void *h = api->create_instance(".", "");
-    for (int i = 0; i < S(4); i++) api->render_block(h, out, 128);
-    ev_t chord[] = {{0, 0x90, 48, 100}, {S(0.4), 0x90, 51, 100}, {S(0.8), 0x90, 55, 100}, {S(6), 0x80, 48, 0},
-                    {S(6), 0x80, 51, 0}, {S(6), 0x80, 55, 0}};
-    render(dir, "m0_init_chord", h, chord, 6, S(8));
-    api->destroy_instance(h);
-
-    /* A wide, sprayed cloud: long grains, full jitter, a sine source. */
-    h = api->create_instance(".", "");
-    sp(h, "an_a_wave", "Sine");
-    sp(h, "gr_spray", "0.8");
-    sp(h, "gr_size", "0.85");
-    sp(h, "gr_dens", "0.6");
-    sp(h, "gr_jit", "1");
-    sp(h, "gr_spread", "1");
-    for (int i = 0; i < S(4); i++) api->render_block(h, out, 128);
-    ev_t pad[] = {{0, 0x90, 48, 100}, {0, 0x90, 55, 100}, {0, 0x90, 62, 100}, {S(7), 0x80, 48, 0},
-                  {S(7), 0x80, 55, 0}, {S(7), 0x80, 62, 0}};
-    render(dir, "m0_sine_cloud", h, pad, 6, S(9));
-    api->destroy_instance(h);
-
-    /* Jitter 0 at a high density: the grain rate is heard as a buzz of its own. */
-    h = api->create_instance(".", "");
-    sp(h, "gr_jit", "0");
-    sp(h, "gr_dens", "0.8");
-    sp(h, "gr_size", "0.3");
-    for (int i = 0; i < S(4); i++) api->render_block(h, out, 128);
-    ev_t buzz[] = {{0, 0x90, 48, 100}, {S(3), 0x80, 48, 0}, {S(3.2), 0x90, 43, 100}, {S(6), 0x80, 43, 0}};
-    render(dir, "m0_pulse_train", h, buzz, 4, S(7.5));
-    api->destroy_instance(h);
-
-    /* Freeze with CC 69, then a high chord over the frozen 1 s loop. */
-    h = api->create_instance(".", "");
-    sp(h, "buf_len", "0.25");
-    sp(h, "gr_spray", "0.6");
-    for (int i = 0; i < S(2); i++) api->render_block(h, out, 128);
-    ev_t frz[] = {{0, 0xB0, 69, 127}, {1, 0xB0, 69, 0}, {S(0.1), 0x90, 60, 90}, {S(0.1), 0x90, 67, 90},
-                  {S(5), 0x80, 60, 0}, {S(5), 0x80, 67, 0}};
-    render(dir, "m0_frozen", h, frz, 6, S(7));
+    char buf[64];
+    api->get_param(h, "preset_count", buf, sizeof buf);
+    int n = atoi(buf);
+    for (int i = 0; i < n; i++) {
+        snprintf(buf, sizeof buf, "%d", i);
+        sp(h, "preset", buf);
+        for (int b = 0; b < S(2); b++) api->render_block(h, out, 128); /* the tape or ring fills */
+        char name[64], file[80];
+        api->get_param(h, "preset_name", name, sizeof name);
+        int k = 0;
+        for (const char *c = name; *c && k < 60; c++) file[k++] = (*c == ' ') ? '_' : (char)tolower((unsigned char)*c);
+        file[k] = 0;
+        char fname[96];
+        snprintf(fname, sizeof fname, "%02d_%s", i, file);
+        ev_t ev[] = {{0, 0x90, 48, 100}, {S(0.7), 0x90, 51, 90}, {S(1.4), 0x90, 55, 90}, {S(6), 0x80, 48, 0},
+                     {S(6), 0x80, 51, 0}, {S(6), 0x80, 55, 0}};
+        render(dir, fname, h, ev, 6, S(10));
+        midi(h, 0xB0, 120, 0);
+    }
     api->destroy_instance(h);
     return 0;
 }

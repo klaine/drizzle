@@ -76,6 +76,8 @@ inc   = ±2^(semis/12) · (buffer_rate / 44100)
   through `move_info.h`, as Crest's arp Scale = Set does; chromatic when unknown).
 - **Reverse** `gr_rev` 0..1: probability that a grain reads backwards. A reverse grain plays the
   same segment as a forward one would, from its end.
+- **Read step** is clamped to 1/64..16. Grains of a Scan tape keep their whole segment inside the
+  tape: a grain longer than the tape allows at its pitch is shortened.
 - **Range:** with no band-limiting on read, grains far above the root alias. Up to +24 semitones
   above `src_root` is the intended range (C3 root → C5); factory patches stay within it. A
   half-rate mip of the tape is an M2 experiment ([15](15-risks-and-open-questions.md) R3).
@@ -83,10 +85,12 @@ inc   = ±2^(semis/12) · (buffer_rate / 44100)
 ## 5. Window, size, pan, level
 - **Size** `gr_size` 0..1. Cloud: 5 ms..2 s, exponential. Tempo: 1/16..4 steps, exponential, so
   gate length follows the tempo. The card shows ms or steps.
-- **Window** `gr_win`: **Hann**, **Gauss** (σ = 0.18), **Tukey** (flat top, 25% cosine edges),
-  **Perc** (2 ms rise, exponential fall to −60 dB), **Swell** (Perc reversed), **Rect** (2 ms
-  edges). 1 025-point tables in `windows_gen.c`, linear interpolation, RMS normaliser `w_norm` per
-  window ([03 §5](03-dsp-architecture.md)).
+- **Window** `gr_win`: **Hann**, **Gauss** (σ = 0.18, lowered and rescaled to start and end at 0),
+  **Tukey** (flat top, 25 % cosine edges), **Perc** (a cosine rise over 3 % of the grain, then an
+  exponential fall to −60 dB), **Swell** (Perc reversed), **Rect** (3 % cosine edges). The edges
+  are fractions of the grain, not milliseconds, so the six windows are fixed tables: 1 025 points
+  plus a guard point in the generated `windows_gen.c`, linearly interpolated, with an RMS normaliser
+  `DRZ_WIN_NORM` (at most 2) that gives each window Hann's loudness ([03 §5](03-dsp-architecture.md)).
 - **Spread** `gr_spread` 0..1: pan = voice pan + `spread · rand_bi()`, equal-power.
 - **Level spray** `gr_lspr` 0..1: grain level `1 − lspr · u` (accents and dropouts).
 

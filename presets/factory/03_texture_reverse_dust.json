@@ -1,0 +1,9 @@
+{
+  "name": "Reverse Dust",
+  "category": "texture",
+  "values": {
+    "buf_mode": "Live", "an_noise": 0.15, "src_fold": 0.3, "sw_timb": 0, "gr_rev": 0.7, "gr_size": 0.45,
+    "gr_dens": 0.8, "gr_jit": 1, "gr_spray": 0.6, "gr_lspr": 0.6, "gr_win": "Perc", "gr_spread": 1,
+    "dly_lvl": 0.3, "rev_lvl": 0.35
+  }
+}

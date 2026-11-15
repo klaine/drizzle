@@ -36,8 +36,10 @@ SOFTWARE.
 
 ## Crest and Amino (MIT, same author)
 
-Drizzle's build scripts, polyBLEP oscillator, DSP helpers and contract validator
-are adapted from [Crest](https://github.com/klaine/crest) and
+Drizzle's build scripts, code generator, polyBLEP oscillators, envelope,
+effects chain (`src/dsp/fx.c`), DSP helpers, contract validator and browser
+host (`web/wasm_host.c`, `web/worklet.js`, `web/engine.js`) are adapted from
+[Crest](https://github.com/klaine/crest) and
 [Amino](https://github.com/klaine/amino), released under the same MIT licence
 as Drizzle. From M2, Drizzle also uses Amino's wavetables; their AKWF-FREE
 (CC0) sources will be credited here when they arrive.

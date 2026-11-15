@@ -6,8 +6,10 @@ own sound source: a small wavetable or virtual-analog synth renders into a share
 every note you play becomes a cloud of grains read back from that buffer at the note's pitch.
 Sample playback comes later as a second source.
 
-> **Status:** early development (milestone M0: a playable skeleton, not yet tried on a Move). See
-> [plan/16-implementation-status.md](plan/16-implementation-status.md). Build with `scripts/build.sh`.
+> **Status:** early development (milestone M1: the Analog source, Live / Freeze / Scan buffers, the
+> grain engine and the effects; not yet tried on a Move). See
+> [plan/16-implementation-status.md](plan/16-implementation-status.md). Build with `scripts/build.sh`;
+> `build/drizzle.html` is the synth in one file for the browser.
 
 ## The idea
 

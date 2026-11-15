@@ -13,9 +13,7 @@ ALLOWED = {
     # string / memory
     "memcpy", "memset", "memmove", "memcmp", "strcmp", "strncmp", "strlen", "strcpy", "strncpy",
     # number parsing / formatting (no allocation, no I/O)
-    "strtof", "strtol", "atoi", "snprintf",
-    # vsnprintf: the contract strings, built once in move_plugin_init_v2 (params.c)
-    "vsnprintf",
+    "strtof", "strtol", "atoi", "snprintf", "strchr",
     # libm
     "sinf", "cosf", "sincosf", "tanf", "expf", "exp2f", "logf", "powf", "sqrtf", "floorf", "fabsf", "roundf",
     "lrintf", "log1pf", "fminf", "fmaxf", "tanhf",

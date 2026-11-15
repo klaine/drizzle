@@ -20,18 +20,21 @@ in [15 §3](15-risks-and-open-questions.md).
 `cpu_us` is recorded.
 
 ## M1 — Grain engine, Scan tapes, codegen
-- [ ] `tools/gen/params.py` with every key in [10](10-parameter-reference.md) (inert keys allowed);
-      `gen.py` adapted from Crest: `params_gen.*`, `contract_gen.c`, `windows_gen.c`, `build/ui/*.json`, `--check`.
-- [ ] `params.c`: get/set, dirty bits, smoothing, state blob, migration hook.
-- [ ] Buffer: Live ring with the read guard, Freeze with the seam crossfade, Scan tape render at 8×
+- [x] `tools/gen/params.py` with every key in [10](10-parameter-reference.md) (inert keys allowed);
+      `gen.py` adapted from Crest: `params_gen.*`, `contract_gen.c`, `windows_gen.c`, `factory_presets.c`,
+      `build/ui/*.json`, `--check`.
+- [x] `params.c`: get/set, state blob, factory bank and browser keys, `buf_view` / `grain_view`.
+      (Smoothing beyond the master volume and the migration hook wait for a need: no release yet.)
+- [x] Buffer: Live ring with the read guard, Freeze with the seam crossfade, Scan tape render at 8×
       with debounce and click-free swap, display bins.
-- [ ] Grains: pool, Cloud scheduler, position/spray/scan, Hermite reads, 6 windows, pitch and
-      pitch spray with quantise, reverse, spread, level spray, gain normalisation.
-- [ ] Sources: Analog (Crest's oscillators), fold, tone; Sweep.
-- [ ] Voices (Poly), Amp envelope, FX chain ported from Crest.
-- [ ] Pages: Main, Source, Analog, Analog Mod, Sweep, Grains, Grain Pitch, Amp Env, FX.
-- [ ] **WASM site and single file** early, so sound design can start.
-- [ ] Contract, params, state, buffer and grain suites.
+- [x] Grains: pool, Cloud scheduler, position/spray/scan, Hermite reads, 6 windows, pitch and
+      pitch spray with quantise, reverse, spread, level spray, gain normalisation, release thinning.
+- [x] Sources: Analog (Crest's oscillators) with density, FM, sync and noise; fold, tone; Sweep.
+- [x] Voices (Poly, voice limit, bend, octave), Amp envelope, FX chain ported from Crest.
+- [x] Pages: Main, Source, Analog, Analog Mod, Sweep, Grains, Grain Pitch, Amp Env, Env Options,
+      Voice, Crush, Chorus, Delay, Reverb, plus the factory browser.
+- [x] **WASM site and single file** (`scripts/build_web.sh`, `build/drizzle.html`), with a patch-JSON export.
+- [x] Contract, params, state, preset, source, buffer, scan, grain and FX suites; six starter patches.
 
 **Accept:** an 8-voice granular synth on an Analog source in Live and Scan, fully editable on the
 Move, state round-trips, `cpu_us` ≤ 500 µs with 8 voices and 64 grains.

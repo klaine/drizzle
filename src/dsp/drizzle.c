@@ -1,6 +1,5 @@
-/* Drizzle: Schwung sound-generator module. Plugin entry points, instance pool, MIDI, render loop
- * (plan/01 section 2, plan/03 section 2). M0: one Analog source writing a Live ring, 8 voices of
- * grains read from it, a fixed attack/release envelope. */
+/* Drizzle: Schwung sound-generator module. Plugin entry points, instance pool, voices, MIDI and the
+ * render loop (plan/01 section 2, plan/03 section 2, plan/07). */
 #ifdef DRZ_PROFILE
 #define _POSIX_C_SOURCE 200809L /* clock_gettime for cpu_us */
 #endif
@@ -16,12 +15,11 @@
 #include "drizzle.h"
 #include "dsp_util.h"
 
-#define VOICE_GAIN 0.35f   /* fixed per voice, never normalised by the voice count (plan/03 section 5) */
-#define ATTACK_S 0.02f     /* M0 envelope: linear attack ... */
-#define RELEASE_S 0.4f     /* ... exponential release (time constant) */
+#define VOICE_GAIN 0.35f /* fixed per voice, never normalised by the voice count (plan/03 section 5) */
 
 static const host_api_v1_t *g_host;
 static drz_inst_t g_pool[DRZ_MAX_INSTANCES]; /* .bss, no malloc: about 6.5 MB each (plan/03 section 3) */
+static uint8_t g_ever_used[DRZ_MAX_INSTANCES];
 static plugin_api_v2_t g_api;
 static char g_err[64];
 
@@ -30,12 +28,18 @@ static char g_err[64];
 static drz_inst_t *claim(drz_inst_t *p) {
     int expect = 0;
     if (!atomic_compare_exchange_strong(&p->in_use, &expect, 1)) return NULL;
-    /* Clear everything in front of the big buffers (a few KB); the buffers themselves are never
-     * cleared: `valid` says what may be read. */
-    memset((char *)p + offsetof(drz_inst_t, slot), 0, offsetof(drz_inst_t, data) - offsetof(drz_inst_t, slot));
-    p->slot = (int)(p - g_pool);
-    p->rng = 0x9E3779B1u * (uint32_t)(p->slot + 1) | 1u;
+    int slot = (int)(p - g_pool);
+    /* Clear everything in front of the effects and buffers (a few tens of KB). The effect arena is
+     * cleared incrementally by fx_init, the buffers never: `valid` and `tape_len` say what is readable. */
+    memset((char *)p + offsetof(drz_inst_t, slot), 0, offsetof(drz_inst_t, fx) - offsetof(drz_inst_t, slot));
+    memset(&p->fx, 0, offsetof(fx_t, mem));
+    fx_init(&p->fx, g_ever_used[slot]);
+    g_ever_used[slot] = 1;
+    p->slot = slot;
+    p->rng = 0x9E3779B1u * (uint32_t)(slot + 1) | 1u;
+    p->bpm = 120.0f;
     params_defaults(p);
+    source_prepare(p);
     buffer_reset(p);
     grains_reset(p);
     p->vol_cur = 2.0f * sqrf(p->v[P_PATCH_VOL]);
@@ -67,8 +71,7 @@ static void drz_destroy_instance(void *instance) {
 }
 
 static int drz_get_error(void *instance, char *buf, int buf_len) {
-    drz_inst_t *I = drz_inst(instance);
-    const char *e = I ? "" : g_err;
+    const char *e = drz_inst(instance) ? "" : g_err;
     int n = (int)strlen(e);
     if (n == 0 || !buf || buf_len < n + 1) return 0;
     memcpy(buf, e, (size_t)n + 1);
@@ -77,31 +80,55 @@ static int drz_get_error(void *instance, char *buf, int buf_len) {
 
 /* ------------------------------------------------------------------ voices (plan/07 section 1) */
 
+static int voices_sounding(const drz_inst_t *I) {
+    int n = 0;
+    for (int i = 0; i < DRZ_VOICES; i++) n += I->voice[i].active;
+    return n;
+}
+
 static void note_on(drz_inst_t *I, int note, int vel) {
+    int limit = clampi((int)I->v[P_V_VOICES], 1, DRZ_VOICES);
     voice_t *pick = NULL;
     for (int i = 0; i < DRZ_VOICES && !pick; i++) /* the same key again: reuse its voice */
         if (I->voice[i].active && I->voice[i].note == note) pick = &I->voice[i];
-    for (int i = 0; i < DRZ_VOICES && !pick; i++)
-        if (!I->voice[i].active) pick = &I->voice[i];
+    if (!pick && voices_sounding(I) < limit)
+        for (int i = 0; i < DRZ_VOICES && !pick; i++)
+            if (!I->voice[i].active) pick = &I->voice[i];
     if (!pick) { /* steal: the quietest released voice, else the oldest */
         for (int i = 0; i < DRZ_VOICES; i++) {
             voice_t *v = &I->voice[i];
-            if (!v->gate && (!pick || v->env < pick->env)) pick = v;
+            if (v->active && !v->gate && (!pick || v->amp.y < pick->amp.y)) pick = v;
         }
         if (!pick)
             for (int i = 0; i < DRZ_VOICES; i++)
-                if (!pick || I->voice[i].age < pick->age) pick = &I->voice[i];
+                if (I->voice[i].active && (!pick || I->voice[i].age < pick->age)) pick = &I->voice[i];
     }
+    if (!pick) return;
     int vi = (int)(pick - I->voice);
     if (pick->active && pick->note != note) voice_kill_grains(I, vi); /* a stolen voice's grains fade in 64 samples */
-    if (!pick->active) pick->env = 0.0f;
+    if (!pick->active) {
+        pick->amp.y = 0.0f;
+        pick->amp.stage = ES_IDLE;
+    }
+    if (I->keys_down == 0) I->src_live.sweep_s = 0.0f; /* the Live sweep restarts with a new phrase */
+    I->keys_down++;
     pick->active = 1;
     pick->gate = 1;
     pick->note = (uint8_t)note;
     pick->vel = (uint8_t)vel;
+    float vn = (float)vel * (1.0f / 127.0f);
+    pick->vel_gain = 1.0f - I->v[P_AE_VEL] * (1.0f - vn * vn);
     pick->age = ++I->age_ctr;
     pick->next = 0.0f; /* the first grain starts at note-on */
+    pick->scan_off = 0.0f;
+    env_trigger(&pick->amp, 0);
     I->sustained[vi] = 0;
+}
+
+static void release_voice(drz_inst_t *I, voice_t *v) {
+    v->gate = 0;
+    env_release(&v->amp);
+    if (I->keys_down > 0) I->keys_down--;
 }
 
 static void note_off(drz_inst_t *I, int note) {
@@ -109,20 +136,23 @@ static void note_off(drz_inst_t *I, int note) {
         voice_t *v = &I->voice[i];
         if (v->active && v->gate && v->note == note) {
             if (I->sustain_down) I->sustained[i] = 1;
-            else v->gate = 0;
+            else release_voice(I, v);
         }
     }
 }
 
-static void all_off(drz_inst_t *I, int hard) {
+void voices_all_off(drz_inst_t *I, int hard) {
     for (int i = 0; i < DRZ_VOICES; i++) {
-        I->voice[i].gate = 0;
+        voice_t *v = &I->voice[i];
         I->sustained[i] = 0;
+        if (v->gate) release_voice(I, v);
         if (hard) {
             voice_kill_grains(I, i);
-            I->voice[i].env = 0.0f;
+            v->amp.y = 0.0f;
+            v->amp.stage = ES_IDLE;
         }
     }
+    I->keys_down = 0;
 }
 
 /* ------------------------------------------------------------------ MIDI (plan/01 section 6) */
@@ -149,7 +179,7 @@ static void drz_on_midi(void *instance, const uint8_t *msg, int len, int source)
                 for (int i = 0; i < DRZ_VOICES; i++)
                     if (I->sustained[i]) {
                         I->sustained[i] = 0;
-                        I->voice[i].gate = 0;
+                        release_voice(I, &I->voice[i]);
                     }
             break;
         case 69: { /* Freeze: a rising edge toggles it (plan/05 section 3) */
@@ -158,11 +188,13 @@ static void drz_on_midi(void *instance, const uint8_t *msg, int len, int source)
             I->cc69 = on;
             break;
         }
-        case 120: all_off(I, 1); break;
-        case 123: all_off(I, 0); break;
+        case 120: voices_all_off(I, 1); break;
+        case 121: I->bend = 0.0f; break;
+        case 123: voices_all_off(I, 0); break;
         default: break;
         }
         break;
+    case 0xE0: I->bend = (float)(((d2 << 7) | d1) - 8192) * (1.0f / 8192.0f); break;
     default: break;
     }
 }
@@ -188,34 +220,14 @@ static inline float soft_clip(float x) {
     return x < 0.0f ? -y : y;
 }
 
-/* Freezing turns the Live grains into loop grains, so a grain that was reading towards the head runs
- * on into the start of the loop (which the seam crossfade continues) instead of into stale data. */
-static void freeze_live_grains(drz_inst_t *I) {
-    const buffer_t *b = &I->buf;
-    for (int k = 0; k < I->n_live; k++) {
-        grain_t *g = &I->grain[I->live[k]];
-        if (!g->live) continue;
-        int32_t q = (int32_t)(g->pos >> 32) - b->ls;
-        if (q < 0) q += DRZ_RING;
-        int64_t fr = g->pos & 0xFFFFFFFF;
-        g->live = 0;
-        g->ls = b->ls;
-        g->lf = b->lf;
-        if (q < b->lf) g->pos = ((int64_t)q << 32) | fr;
-        else { /* older than the loop: fade it out where it is */
-            g->pos = fr;
-            g->fade = DRZ_KILL_FADE;
-        }
-    }
-}
-
 static void apply_params(drz_inst_t *I) {
     I->pdirty = 0;
-    int want = I->v[P_BUF_FREEZE] >= 0.5f, have = I->buf.frozen || I->buf.wait_full;
-    if (want != have) {
-        buffer_set_freeze(I, want);
-        if (I->buf.frozen) freeze_live_grains(I);
-    }
+    source_prepare(I);
+    buffer_t *b = &I->buf;
+    int mode = (int)I->v[P_BUF_MODE];
+    if (mode != b->mode) buffer_set_mode(I, mode);
+    int want = I->v[P_BUF_FREEZE] >= 0.5f;
+    if (b->mode == BUF_MODE_LIVE && want != (b->frozen || b->wait_full)) buffer_set_freeze(I, want);
 }
 
 static void drz_render_block(void *instance, int16_t *out, int frames) {
@@ -231,21 +243,24 @@ static void drz_render_block(void *instance, int16_t *out, int frames) {
 #endif
     uint64_t fp = ftz_enter();
     if (I->pdirty) apply_params(I);
-    const float att = (float)DRZ_SUB / (ATTACK_S * DRZ_FS);
-    const float rel = expf(-(float)DRZ_SUB / (RELEASE_S * DRZ_FS));
+    if (g_host && g_host->get_bpm) {
+        float bpm = g_host->get_bpm();
+        I->bpm = bpm > 20.0f && bpm < 400.0f ? bpm : 120.0f;
+    }
+    env_par_t ep = {I->v[P_AE_A], I->v[P_AE_D], I->v[P_AE_S], I->v[P_AE_R]};
+    float scan = map_scan(I->v[P_GR_SCAN]);
     float vl[DRZ_VOICES][DRZ_SUB], vr[DRZ_VOICES][DRZ_SUB];
 
     for (int done = 0; done < frames;) {
         int cnt = frames - done;
         if (cnt > DRZ_MAX_FRAMES) cnt = DRZ_MAX_FRAMES;
-        int was_frozen = I->buf.frozen;
-        buffer_write_block(I, cnt); /* the source first: grains read what was written for this chunk */
-        if (I->buf.frozen && !was_frozen) freeze_live_grains(I); /* a freeze that waited for a full buffer */
+        buffer_block(I, cnt); /* the source first: grains read what was written for this chunk */
         /* Grain positions are aligned to the output sample: sample sb of this chunk is absolute w - cnt + sb. */
-        int64_t base = I->buf.frozen ? (int64_t)1 << 60 : I->buf.w - cnt;
+        int live = I->buf.mode == BUF_MODE_LIVE && !I->buf.frozen;
+        int64_t base = live ? I->buf.w - cnt : (int64_t)1 << 60;
+        int32_t readable = buffer_readable(I);
         memset(I->busl, 0, (size_t)cnt * sizeof(float));
         memset(I->busr, 0, (size_t)cnt * sizeof(float));
-        float root = I->v[P_SRC_ROOT];
         for (int sb = 0; sb < cnt; sb += DRZ_SUB) {
             int n = cnt - sb < DRZ_SUB ? cnt - sb : DRZ_SUB;
             float env0[DRZ_VOICES];
@@ -253,23 +268,23 @@ static void drz_render_block(void *instance, int16_t *out, int frames) {
             memset(vr, 0, sizeof vr);
             for (int vi = 0; vi < DRZ_VOICES; vi++) {
                 voice_t *v = &I->voice[vi];
-                env0[vi] = v->env;
+                env0[vi] = v->amp.y;
                 if (!v->active) continue;
-                if (v->gate) v->env = v->env + att > 1.0f ? 1.0f : v->env + att;
-                else if ((v->env *= rel) < 1e-4f) v->env = 0.0f;
-                v->pitch_ratio = exp2f(((float)v->note - root) * (1.0f / 12.0f));
-                voice_spawn_grains(I, v, vi, sb, n, base + sb);
+                env_tick(&v->amp, &ep);
+                if (readable > 0) v->scan_off += scan * (float)n / (float)readable;
+                voice_spawn_grains(I, v, vi, n, base + sb);
             }
             grains_render(I, vl, vr, n, base + sb);
             for (int vi = 0; vi < DRZ_VOICES; vi++) {
                 voice_t *v = &I->voice[vi];
                 if (!v->active) continue;
-                float g = env0[vi] * VOICE_GAIN, dg = (v->env - env0[vi]) * VOICE_GAIN / (float)n;
+                float k = VOICE_GAIN * v->vel_gain;
+                float g = env0[vi] * k, dg = (v->amp.y - env0[vi]) * k / (float)n;
                 for (int i = 0; i < n; i++, g += dg) {
                     I->busl[sb + i] += vl[vi][i] * g;
                     I->busr[sb + i] += vr[vi][i] * g;
                 }
-                if (!v->gate && v->env == 0.0f && v->n_grains == 0) v->active = 0;
+                if (!v->gate && v->amp.stage == ES_IDLE && v->n_grains == 0) v->active = 0;
             }
         }
         float chk = 0.0f;
@@ -277,9 +292,12 @@ static void drz_render_block(void *instance, int16_t *out, int frames) {
         if (!isfinite(chk) || chk > 1e12f) { /* NaN guard (plan/03 section 5) */
             memset(I->busl, 0, (size_t)cnt * sizeof(float));
             memset(I->busr, 0, (size_t)cnt * sizeof(float));
-            for (int vi = 0; vi < DRZ_VOICES; vi++) voice_kill_grains(I, vi);
+            grains_kill_all(I);
+            fx_reset(&I->fx);
+            source_reset(&I->src_live, (uint32_t)I->v[P_SRC_SEED]);
             I->nan_resets++;
         }
+        fx_process(&I->fx, I->v, I->bpm, I->busl, I->busr, cnt);
         float vol = 2.0f * sqrf(I->v[P_PATCH_VOL]), dv = (vol - I->vol_cur) / (float)cnt;
         int16_t *o = out + 2 * done;
         for (int i = 0; i < cnt; i++) {
@@ -314,7 +332,5 @@ static plugin_api_v2_t g_api = {
 
 DRZ_EXPORT plugin_api_v2_t *move_plugin_init_v2(const host_api_v1_t *host) {
     g_host = host;
-    params_build_contract();
-    grains_init_tables();
     return &g_api;
 }
