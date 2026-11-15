@@ -60,9 +60,10 @@ Move, state round-trips, `cpu_us` ≤ 500 µs with 8 voices and 64 grains.
 "Poly AT → Density" work on the device; the full worst case ≤ 900 µs p99.
 
 ## M4 — UI & content
-- [ ] Home page canvas, cards, Patches browser, help.
-- [ ] Remote UI panel with the buffer view.
-- [ ] 64 factory patches ([12 §4](12-presets-and-state.md)), levelled, golden-tested.
+- [x] Home page canvas, cards, Patches browser, help (`src/canvas.js`, `src/cards.js`, `src/help.json`).
+- [x] Remote UI panel with the buffer view and the shared preset browser (`src/web_ui.html`, `src/web/`).
+- [x] 65 factory patches ([12 §4](12-presets-and-state.md)), levelled (`tools/level`), golden-tested.
+- [ ] Device run-through: no unusable page, macros 1–4 audible on every patch. Needs a Move.
 
 **Accept:** every patch loads click-free with macros 1–4 assigned; a blind run-through on the
 device finds no unusable page.

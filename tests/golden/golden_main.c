@@ -1,6 +1,7 @@
 /* Golden audio (plan/13 section 3): render every factory patch and a few feature cases, and print a
  * fingerprint of each as JSON for tests/golden/check_golden.py. Fixed seeds make every render
- * deterministic; the fingerprint (per 250 ms: RMS of each channel in dB and the zero-crossing rate)
+ * deterministic; the fingerprint (per 250 ms: RMS of each channel in dB, the zero-crossing rate and the
+ * peak in dB)
  * is robust to the last-bit float differences between machines.
  *
  *   build/drizzle_golden > fingerprints.json */
@@ -29,7 +30,7 @@ static void case_render(const char *name, void *h, int first) {
     for (int b = 0; b < 517; b++) api->render_block(h, blk, 128);
     static const int CHORD[3] = {48, 51, 55};
     for (int k = 0; k < 3; k++) midi(h, 0x90, CHORD[k], 100);
-    double sl[2] = {0, 0};
+    double sl[2] = {0, 0}, pk = 0;
     long zc = 0, n = 0, total = 0;
     float prev = 0.0f;
     printf("%s  \"%s\": [", first ? "" : ",\n", name);
@@ -42,11 +43,13 @@ static void case_render(const char *name, void *h, int first) {
             sl[0] += (double)l * (double)l;
             sl[1] += (double)r * (double)r;
             zc += (prev < 0.0f) != (l < 0.0f);
+            if (fabs((double)l) > pk) pk = fabs((double)l);
+            if (fabs((double)r) > pk) pk = fabs((double)r);
             prev = l;
             if (++n == SLICE) {
                 double dl = 10.0 * log10(sl[0] / SLICE + 1e-12), dr = 10.0 * log10(sl[1] / SLICE + 1e-12);
-                printf("%s[%.2f,%.2f,%.4f]", slice ? "," : "", dl, dr, (double)zc / SLICE);
-                sl[0] = sl[1] = 0;
+                printf("%s[%.2f,%.2f,%.4f,%.2f]", slice ? "," : "", dl, dr, (double)zc / SLICE, 20.0 * log10(pk + 1e-9));
+                sl[0] = sl[1] = pk = 0;
                 zc = n = 0;
                 slice++;
             }

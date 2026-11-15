@@ -76,7 +76,7 @@ static const char *const OPTS_REV_FRZ[] = {"Off", "On"};
 static const char *const OPTS_SMP_NORM[] = {"Off", "On"};
 
 const param_desc_t DRZ_PARAMS[P_COUNT] = {
-    [P_PATCH_VOL] = {"patch_vol", PK_FLOAT, 0, PF_STATE|PF_CP, 0.0f, 1.0f, 0.7f, 0},
+    [P_PATCH_VOL] = {"patch_vol", PK_FLOAT, 0, PF_STATE|PF_CP, 0.0f, 1.0f, 0.5f, 0},
     [P_BUF_MODE] = {"buf_mode", PK_ENUM, 2, PF_STATE|PF_CP, 0.0f, 1.0f, 1.0f, OPTS_BUF_MODE},
     [P_BUF_LEN] = {"buf_len", PK_FLOAT, 0, PF_STATE|PF_CP, 0.0f, 1.0f, 0.75f, 0},
     [P_BUF_FREEZE] = {"buf_freeze", PK_ENUM, 2, PF_STATE|PF_CP, 0.0f, 1.0f, 0.0f, OPTS_BUF_FREEZE},

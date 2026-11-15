@@ -4,8 +4,9 @@
 #   scripts/build_web.sh            # drizzle.wasm, node test, build/site, build/drizzle.html
 #   scripts/build_web.sh --no-test  # skip the node test
 #
-# Compiles src/dsp to WebAssembly (one instance, -DDRZ_WASM) and lays out build/site: web/ driving
-# the engine in an AudioWorklet, played from the page, the computer keyboard or Web MIDI.
+# Compiles src/dsp to WebAssembly (one instance, -DDRZ_WASM) and lays out build/site: the Remote UI
+# (src/web_ui.html + src/web/) driving the engine in an AudioWorklet, played from the page, the
+# computer keyboard or Web MIDI.
 # Serve it with: python3 -m http.server -d build/site 8765
 # build/drizzle.html is the same synth in one file (scripts/build_single.py): open it from disk, or
 # publish it on the pages branch with scripts/pages.sh.
@@ -52,9 +53,18 @@ fi
 echo "== site"
 SITE=build/site
 rm -rf "$SITE"
-mkdir -p "$SITE"
-cp web/index.html web/app.js web/engine.js web/worklet.js web/style.css build/ui/ui_meta.json build/drizzle.wasm "$SITE/"
+mkdir -p "$SITE/assets/ui" "$SITE/assets/engine"
+cp src/web/*.js src/web/*.css build/ui/ui_meta.json "$SITE/assets/ui/"
+cp web/engine.js web/worklet.js build/drizzle.wasm "$SITE/assets/engine/"
+# The page is web_ui.html without the device bridge, so it boots the browser engine.
+"$PY" - src/web_ui.html "$SITE/index.html" <<'PYEOF'
+import sys
+src = open(sys.argv[1], encoding="utf-8").read()
+tag = '<script src="/static/schwung-remote-api.js"></script>\n'
+assert tag in src, "web_ui.html no longer loads /static/schwung-remote-api.js"
+open(sys.argv[2], "w", encoding="utf-8").write(src.replace(tag, ""))
+PYEOF
 touch "$SITE/.nojekyll"
 echo "built $SITE ($(du -sh "$SITE" | cut -f1))"
 
-"$PY" scripts/build_single.py "$SITE" build/drizzle.html
+"$PY" scripts/build_single.py --out build/drizzle.html

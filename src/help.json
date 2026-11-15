@@ -6,31 +6,225 @@
       "lines": [
         "Drizzle is a",
         "granular synth. A",
-        "saw or sine source",
-        "records into a",
-        "buffer; each note",
-        "plays a cloud of",
-        "grains read from it",
-        "at the note's pitch.",
-        "",
-        "This is an early",
-        "test build (M0)."
+        "small synth",
+        "(wavetable or",
+        "analog) plays into a",
+        "buffer, and every",
+        "note you play is a",
+        "cloud of grains read",
+        "back from it at the",
+        "note's pitch. The",
+        "first page shows the",
+        "buffer, where new",
+        "grains start, and",
+        "the grains playing",
+        "now. Jog turns",
+        "pages; Shift+jog-",
+        "click opens the",
+        "section picker."
       ]
     },
     {
       "title": "Main page",
       "lines": [
-        "Pos: how far back",
-        "in the buffer.",
-        "Spray: random",
-        "position spread.",
+        "Pos: where grains",
+        "start. Spray: random",
+        "spread around it.",
         "Size: grain length.",
-        "Dens: grains per s.",
-        "Jit: random timing.",
-        "Len: buffer length.",
-        "Frz: freeze the",
-        "buffer (CC 69 too).",
-        "Vol: volume."
+        "Dens: grains per",
+        "second. PSpr: random",
+        "pitch. Scan: moves",
+        "the start through",
+        "the buffer as notes",
+        "play. Space: reverb.",
+        "Frz: freeze."
+      ]
+    },
+    {
+      "title": "Buffer modes",
+      "lines": [
+        "Scan renders a tape:",
+        "the source sweeping",
+        "through its timbres,",
+        "0.5 to 8 s long.",
+        "Position then picks",
+        "a timbre. Turning a",
+        "source knob renders",
+        "a new tape. Live",
+        "records the source",
+        "all the time;",
+        "Position is how far",
+        "back. Freeze holds",
+        "either one (CC 69",
+        "toggles it)."
+      ]
+    },
+    {
+      "title": "Wavetable",
+      "lines": [
+        "Two oscillators over",
+        "74 tables of 64",
+        "waves. Vintage steps",
+        "between waves, 8-bit",
+        "style; Clean blends",
+        "them. XMod: ring, PM",
+        "or sync from B. The",
+        "Sweep and the Source",
+        "LFO move the wave",
+        "position (Timbre)."
+      ]
+    },
+    {
+      "title": "Analog",
+      "lines": [
+        "Two band-limited",
+        "oscillators: sine,",
+        "triangle, saw or",
+        "pulse with Shape.",
+        "Dens stacks detuned",
+        "copies of A; FM,",
+        "Sync and Noise",
+        "roughen it. Timbre",
+        "moves the Shapes."
+      ]
+    },
+    {
+      "title": "Sweep & S.LFO",
+      "lines": [
+        "Sweep runs once",
+        "across a Scan tape",
+        "(or over Time in",
+        "Live) and moves",
+        "Timbre, Fold, Pitch",
+        "and Tone. A Sweep on",
+        "Pitch makes a",
+        "glissando tape:",
+        "Position picks",
+        "notes, Spray makes",
+        "clusters. The Source",
+        "LFO adds wobble the",
+        "same way."
+      ]
+    },
+    {
+      "title": "Grains",
+      "lines": [
+        "Jitter 0 times",
+        "grains evenly: at",
+        "high density their",
+        "rate is heard as a",
+        "buzz. Jitter 1 is a",
+        "random cloud. Window",
+        "shapes each grain:",
+        "Perc for plucks,",
+        "Swell for reverse-",
+        "like swells, Rect",
+        "for hard edges."
+      ]
+    },
+    {
+      "title": "Pitch & Lock",
+      "lines": [
+        "Grain Pitch and Fine",
+        "transpose. Pitch",
+        "Spray picks random",
+        "pitches, quantised",
+        "to octaves, fifths",
+        "or the set's scale.",
+        "Reverse plays some",
+        "grains backwards.",
+        "Lock lines grains",
+        "up: at 1 a cloud of",
+        "one note becomes a",
+        "clean tone."
+      ]
+    },
+    {
+      "title": "Rhythm",
+      "lines": [
+        "Mode Tempo plays one",
+        "grain per step of",
+        "Div, on Move's",
+        "tempo. Swing delays",
+        "every other step.",
+        "Prob drops steps,",
+        "Rpt repeats a grain,",
+        "Rand Note or Bar",
+        "makes the pattern",
+        "repeat: Bar loops it",
+        "every bar."
+      ]
+    },
+    {
+      "title": "Filter & Env",
+      "lines": [
+        "Each voice has a",
+        "filter (off by",
+        "default) and two",
+        "envelopes. The Mod",
+        "Env moves Position,",
+        "Size, Density, Pitch",
+        "and Cutoff. Release",
+        "thinning lets tails",
+        "thin out instead of",
+        "just fading."
+      ]
+    },
+    {
+      "title": "Modulation",
+      "lines": [
+        "LFO 1 runs per note,",
+        "LFO 2 for all notes",
+        "and can lock to the",
+        "bar. Mod Matrix: 12",
+        "slots of source x",
+        "via to destination.",
+        "Macros 1-4 are",
+        "sources there;",
+        "factory patches use",
+        "them for motion,",
+        "texture, space and a",
+        "trick."
+      ]
+    },
+    {
+      "title": "Pressure",
+      "lines": [
+        "Pad pressure plays",
+        "the cloud: it moves",
+        "density and spray by",
+        "default, and",
+        "Position, Size,",
+        "Pitch Spray and",
+        "Cutoff from the",
+        "Pressure page."
+      ]
+    },
+    {
+      "title": "FX",
+      "lines": [
+        "Crush (Bits for",
+        "8-bit grit), Chorus,",
+        "Delay (tempo sync,",
+        "ping-pong) and",
+        "Reverb. Reverb Cloud",
+        "decays up to 60 s;",
+        "RFrz holds the",
+        "reverb tank."
+      ]
+    },
+    {
+      "title": "Tips",
+      "lines": [
+        "Freeze a Live patch,",
+        "then play high notes",
+        "over it. Lock 1 plus",
+        "Pitch Spray Oct",
+        "makes organ chords.",
+        "Tempo, Rpt 3 and",
+        "Rand Bar make a",
+        "glitch loop that",
+        "repeats exactly."
       ]
     }
   ]

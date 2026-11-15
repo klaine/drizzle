@@ -1,0 +1,32 @@
+{
+  "name": "Swing Dust",
+  "category": "rhythm",
+  "values": {
+    "gr_mode": "Tempo",
+    "rev_lvl": 0.2,
+    "gr_div": "1/16",
+    "gr_size": 0.65,
+    "gr_swing": 0.55,
+    "gr_spray": 0.4,
+    "gr_lspr": 0.6,
+    "gr_rnd": "Note",
+    "wt_a_table": 26,
+    "gr_win": "Hann",
+    "mm01_src": "Macro 1",
+    "mm01_dst": "Probability",
+    "mm01_dep": -0.6,
+    "mm02_src": "Macro 2",
+    "mm02_dst": "Crush",
+    "mm02_dep": 0.5,
+    "mm03_src": "Macro 3",
+    "mm03_dst": "Reverb Level",
+    "mm03_dep": 0.4,
+    "mm04_src": "Macro 4",
+    "mm04_dst": "Reverse",
+    "mm04_dep": 0.8,
+    "mm05_src": "Mod Wheel",
+    "mm05_dst": "Spray",
+    "mm05_dep": 0.5,
+    "patch_vol": 0.643
+  }
+}

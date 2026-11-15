@@ -45,7 +45,7 @@ static drz_inst_t *claim(drz_inst_t *p) {
     source_prepare(p);
     buffer_reset(p);
     grains_reset(p);
-    p->vol_cur = 2.0f * sqrf(p->v[P_PATCH_VOL]);
+    p->vol_cur = 4.0f * sqrf(p->v[P_PATCH_VOL]);
     return p;
 }
 
@@ -534,7 +534,7 @@ static void drz_render_block(void *instance, int16_t *out, int frames) {
         fxv[P_REV_LVL] = clampf(fxv[P_REV_LVL] + gd[MD_REVERB_LEVEL], 0.0f, 1.0f);
         fxv[P_REV_SIZE] = clampf(fxv[P_REV_SIZE] + gd[MD_REVERB_SIZE], 0.0f, 1.0f);
         fx_process(&I->fx, fxv, I->bpm, I->busl, I->busr, cnt);
-        float vol = 2.0f * sqrf(I->v[P_PATCH_VOL]), dv = (vol - I->vol_cur) / (float)cnt;
+        float vol = 4.0f * sqrf(I->v[P_PATCH_VOL]), dv = (vol - I->vol_cur) / (float)cnt;
         int16_t *o = out + 2 * done;
         for (int i = 0; i < cnt; i++) {
             I->vol_cur += dv;

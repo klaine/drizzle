@@ -127,6 +127,14 @@ def chain_params(nfactory):
         out.append(e)
     out.append({"key": "preset", "name": "Factory Patch", "type": "int", "min": 0, "max": max(0, nfactory - 1),
                 "step": 1})
+    # Module-drawn pages (src/canvas.js): the home page in front of the root knobs, and the patch browser.
+    # The home page reads the buffer and the grains (plan/11 section 4); Position, Spray and Freeze reach
+    # it as root knobs.
+    out.append({"key": "home", "name": "Drizzle", "type": "canvas", "canvas_script": "canvas.js", "as_page": True,
+                "page_first": True, "show_value": False,
+                "extra_keys": ["buf_view", "grain_view", "preset_name", "gr_dens"]})
+    out.append({"key": "browse", "name": "Patches", "type": "canvas", "canvas_script": "canvas.js",
+                "as_page": True, "preset_browser": True, "show_value": False, "extra_keys": ["preset", "pb_cat"]})
     return out
 
 
@@ -144,13 +152,13 @@ def knob_key(k):
 def ui_hierarchy():
     levels = {}
     shown = [lv for lv in PM.LEVELS if lv[3] <= PM.MILESTONE]
-    root_params = [knob_entry(k) for k in PM.ROOT_KNOBS]
+    root_params = [{"key": "home"}] + [knob_entry(k) for k in PM.ROOT_KNOBS]
     root_params.append({"level": "factory", "label": "Factory Patches"})
     root_params.append({"level": "category", "label": "Patch Category"})
     root_params += [{"level": lid, "label": label} for lid, label, _knobs, _ms in shown]
     levels["root"] = {"label": PM.ROOT_LABEL, "knobs": [knob_key(k) for k in PM.ROOT_KNOBS], "params": root_params}
     levels["factory"] = {"label": "Factory Patches", "list_param": "pb_index", "count_param": "pb_count",
-                         "name_param": "preset_name", "navigate_to": "root", "params": []}
+                         "name_param": "preset_name", "navigate_to": "root", "params": [{"key": "browse"}]}
     levels["category"] = {"label": "Patch Category", "items_param": "pb_cats", "select_param": "pb_cat",
                           "navigate_to": "factory", "params": []}
     for lid, label, knobs, _ms in shown:
@@ -395,6 +403,43 @@ def ui_presets(presets):
     return out
 
 
+def wave_previews(frames, points):
+    """Small previews of every table for the cards: [table][frame][point] in -127..127."""
+    data = open(WT_BIN, "rb").read()
+    out = []
+    for t in range(len(PM.TABLE_NAMES)):
+        tab = []
+        for k in range(frames):
+            w = round(k * 63 / max(1, frames - 1))
+            off = (t * 64 + w) * 128
+            row = []
+            for i in range(points):
+                b = data[off + i * 128 // points]
+                row.append(b - 256 if b > 127 else b)
+            tab.append(row)
+        out.append(tab)
+    return out
+
+
+def js_meta(presets):
+    """The META objects of src/cards.js and src/canvas.js (device scripts cannot fetch files)."""
+    by = {p["key"]: p for p in PM.PARAMS}
+    cards = {"keys": {by[k]["name"]: k for k in PM.CARD_KEYS}, "disp": {k: disp(by[k]) for k in PM.CARD_KEYS},
+             "range": {k: [fnum(by[k]["mn"]), fnum(by[k]["mx"])] for k in PM.CARD_KEYS
+                       if by[k]["kind"] != "enum" and (by[k]["mn"], by[k]["mx"]) != (0, 1)},
+             "tables": PM.TABLE_NAMES, "wt": wave_previews(4, 24),
+             "src": PM.MOD_SOURCE_SHORT, "dst": PM.MOD_DEST_SHORT}
+    canvas = {"count": len(presets), "cats": [label for _c, label, _i in browse_categories(presets)]}
+    return cards, canvas
+
+
+def fill_block(path, name, obj):
+    text = open(path, encoding="utf-8").read()
+    a, b = "/* BEGIN GENERATED %s */" % name, "/* END GENERATED %s */" % name
+    i, j = text.index(a) + len(a), text.index(b)
+    return text[:i] + "\n  var META = " + json.dumps(obj, separators=(",", ":")) + ";\n  " + text[j:]
+
+
 def generate():
     presets = load_factory()
     cp_obj, uh_obj = chain_params(len(presets)), ui_hierarchy()
@@ -411,6 +456,9 @@ def generate():
         "build/ui/ui_meta.json": minify(ui_meta(presets)) + "\n",
         "build/ui/ui_presets.json": minify(ui_presets(presets)) + "\n",
     }
+    cards_meta, canvas_meta = js_meta(presets)
+    for rel, obj in (("src/cards.js", cards_meta), ("src/canvas.js", canvas_meta)):
+        files[rel] = fill_block(os.path.join(ROOT, rel), "META", obj)
     return files, len(presets), len(cp), len(uh)
 
 

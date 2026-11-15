@@ -20,6 +20,22 @@
     "rev_decay": 0.9,
     "rev_size": 0.95,
     "ae_a": 0.8,
-    "ae_r": 0.8
+    "ae_r": 0.8,
+    "mm01_src": "Macro 1",
+    "mm01_dst": "Scan",
+    "mm01_dep": 0.25,
+    "mm02_src": "Macro 2",
+    "mm02_dst": "Fold",
+    "mm02_dep": 0.5,
+    "mm03_src": "Macro 3",
+    "mm03_dst": "Reverb Size",
+    "mm03_dep": 0.4,
+    "mm04_src": "Macro 4",
+    "mm04_dst": "Pitch Spray",
+    "mm04_dep": 0.5,
+    "mm05_src": "Mod Wheel",
+    "mm05_dst": "Density",
+    "mm05_dep": 0.4,
+    "patch_vol": 0.524
   }
 }

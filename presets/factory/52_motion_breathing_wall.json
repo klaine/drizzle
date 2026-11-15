@@ -1,0 +1,32 @@
+{
+  "name": "Breathing Wall",
+  "category": "motion",
+  "values": {
+    "wt_a_table": 27,
+    "sw_timb": 0.6,
+    "l1_size": 0.4,
+    "l1_rate": 0.388,
+    "l2_dens": 0.4,
+    "l2_rate": 0.289,
+    "gr_size": 0.653,
+    "gr_dens": 0.659,
+    "gr_spray": 0.4,
+    "rev_lvl": 0.5,
+    "mm01_src": "Macro 1",
+    "mm01_dst": "Scan",
+    "mm01_dep": 0.4,
+    "mm02_src": "Macro 2",
+    "mm02_dst": "Spray",
+    "mm02_dep": 0.5,
+    "mm03_src": "Macro 3",
+    "mm03_dst": "Reverb Level",
+    "mm03_dep": 0.4,
+    "mm04_src": "Macro 4",
+    "mm04_dst": "LFO 2 Rate",
+    "mm04_dep": 0.5,
+    "mm05_src": "Mod Wheel",
+    "mm05_dst": "Pitch",
+    "mm05_dep": 0.25,
+    "patch_vol": 0.588
+  }
+}

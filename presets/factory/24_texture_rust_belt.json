@@ -1,0 +1,33 @@
+{
+  "name": "Rust Belt",
+  "category": "texture",
+  "values": {
+    "buf_mode": "Live",
+    "wt_a_table": 70,
+    "sw_timb": 0,
+    "src_fold": 0.5,
+    "gr_size": 0.482,
+    "gr_dens": 0.795,
+    "gr_spray": 0.5,
+    "gr_rev": 0.5,
+    "cr_lvl": 0.35,
+    "cr_type": "Hard",
+    "rev_lvl": 0.3,
+    "mm01_src": "Macro 1",
+    "mm01_dst": "Density",
+    "mm01_dep": 0.5,
+    "mm02_src": "Macro 2",
+    "mm02_dst": "Crush",
+    "mm02_dep": 0.5,
+    "mm03_src": "Macro 3",
+    "mm03_dst": "Reverb Level",
+    "mm03_dep": 0.4,
+    "mm04_src": "Macro 4",
+    "mm04_dst": "Reverse",
+    "mm04_dep": 0.8,
+    "mm05_src": "Mod Wheel",
+    "mm05_dst": "Spray",
+    "mm05_dep": 0.4,
+    "patch_vol": 0.359
+  }
+}

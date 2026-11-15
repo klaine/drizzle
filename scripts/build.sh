@@ -84,6 +84,11 @@ if [ "$TEST" = 1 ]; then
 
   echo "== contract"
   "$PY" tests/contract/validate_contract.py
+  if command -v node >/dev/null 2>&1; then
+    node tests/device/test_device_ui.mjs
+  else
+    echo "== device ui test: skipped (node missing)"
+  fi
 
   echo "== golden"
   "$ZIG" cc -std=c11 -O2 $WARN $MATH -I src/dsp -o "$BUILD/drizzle_golden" $DSP_SRC tests/golden/golden_main.c -lm
@@ -113,7 +118,11 @@ rm -f "$MODULE/dsp.so.o"
 echo "== check dsp.so"
 "$PY" scripts/check_so.py "$MODULE/dsp.so"
 
-cp src/module.json src/help.json LICENSE "$MODULE/"
+cp src/module.json src/help.json src/canvas.js src/cards.js src/web_ui.html LICENSE "$MODULE/"
+# Remote UI (Schwung's browser view of the slot): the app and its generated data
+rm -rf "$MODULE/assets"
+mkdir -p "$MODULE/assets/ui"
+cp src/web/*.js src/web/*.css build/ui/ui_meta.json "$MODULE/assets/ui/"
 
 echo "== package"
 # COPYFILE_DISABLE keeps macOS tar from adding ._ AppleDouble files; --numeric-owner leaves the

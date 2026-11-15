@@ -1,0 +1,33 @@
+{
+  "name": "Rhodes Fog",
+  "category": "keys",
+  "values": {
+    "wt_a_table": 35,
+    "gr_size": 0.659,
+    "gr_dens": 0.705,
+    "gr_spray": 0.15,
+    "gr_spread": 0.7,
+    "ae_a": 0.283,
+    "ae_d": 0.766,
+    "ae_s": 0.35,
+    "ae_r": 0.578,
+    "cho_lvl": 0.4,
+    "rev_lvl": 0.3,
+    "mm01_src": "Macro 1",
+    "mm01_dst": "Size",
+    "mm01_dep": 0.3,
+    "mm02_src": "Macro 2",
+    "mm02_dst": "Spray",
+    "mm02_dep": 0.4,
+    "mm03_src": "Macro 3",
+    "mm03_dst": "Reverb Level",
+    "mm03_dep": 0.4,
+    "mm04_src": "Macro 4",
+    "mm04_dst": "Pitch Spray",
+    "mm04_dep": 0.5,
+    "mm05_src": "Mod Wheel",
+    "mm05_dst": "Position",
+    "mm05_dep": 0.3,
+    "patch_vol": 0.731
+  }
+}

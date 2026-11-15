@@ -9,7 +9,7 @@ Float values are normalised `0..1` unless a unit is given; the curve column says
 ## Global & buffer
 | Key | Name | Short | Type | Range | Default | Curve / notes |
 |---|---|---|---|---|---|---|
-| `patch_vol` | Volume | Vol | float | 0..1 | 0.7 | `x²` × 2 |
+| `patch_vol` | Volume | Vol | float | 0..1 | 0.5 | gain `4·x²` (0.5 = unity, 1 = +12 dB) |
 | `buf_mode` | Buffer Mode | Mode | enum | Live, Scan | Scan | |
 | `buf_len` | Buffer Length | Len | float | 0..1 | 0.75 (4 s) | 0.5..8 s exp |
 | `buf_freeze` | Freeze | Frz | enum | Off, On | Off | CC 69 toggles |

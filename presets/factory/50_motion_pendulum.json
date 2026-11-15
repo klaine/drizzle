@@ -1,0 +1,31 @@
+{
+  "name": "Pendulum",
+  "category": "motion",
+  "values": {
+    "wt_a_table": 57,
+    "sw_timb": 1,
+    "l2_pos": 0.4,
+    "l2_sync": "1 bar",
+    "gr_size": 0.616,
+    "gr_dens": 0.705,
+    "gr_spray": 0.05,
+    "rev_lvl": 0.35,
+    "dly_lvl": 0.3,
+    "mm01_src": "Macro 1",
+    "mm01_dst": "Scan",
+    "mm01_dep": 0.4,
+    "mm02_src": "Macro 2",
+    "mm02_dst": "Spray",
+    "mm02_dep": 0.5,
+    "mm03_src": "Macro 3",
+    "mm03_dst": "Reverb Level",
+    "mm03_dep": 0.4,
+    "mm04_src": "Macro 4",
+    "mm04_dst": "LFO 2 Rate",
+    "mm04_dep": 0.5,
+    "mm05_src": "Mod Wheel",
+    "mm05_dst": "Pitch",
+    "mm05_dep": 0.25,
+    "patch_vol": 0.564
+  }
+}

@@ -36,3 +36,13 @@ button.start { font-size: 16px; padding: 12px; background: var(--accent); color:
 .ctl output { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #dump { width: 100%; font: 12px/1.4 ui-monospace, monospace; }
 @media (max-width: 520px) { .knobs { grid-template-columns: repeat(2, 1fr); } }
+
+/* the shared preset browser (presetbrowser.css) in Drizzle's colours */
+:root {
+  --pb-bg: var(--panel); --pb-field: var(--panel); --pb-raised: var(--bg); --pb-line: var(--line);
+  --pb-line-2: var(--line); --pb-text: var(--ink); --pb-dim: var(--muted); --pb-faint: var(--muted);
+  --pb-accent: var(--accent); --pb-on-accent: #fff;
+}
+.brand { margin-right: 4px; }
+.patch-nav { flex: 1; min-width: 0; }
+.chip { font-size: 13px; }

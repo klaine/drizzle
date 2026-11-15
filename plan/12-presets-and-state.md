@@ -32,12 +32,13 @@ a blob whose `fmt` is not `drizzle` is ignored.
 `name` and `category`; `gen.py` validates and expands them into `factory_presets.c`
 (binary `patch_t` per patch, Crest's method).
 
-**v1 target: 64 patches**, mostly ambient and texture, with a rhythmic corner:
+**The v1 bank: 65 patches with Init** (Pad got one more than planned), mostly ambient and texture,
+with a rhythmic corner:
 
 | Category | Count | Character |
 |---|---|---|
-| Init | 4 | Init Scan (wavetable tape), Init Live, Init Analog, Init Tempo |
-| Pad | 14 | Slow clouds, Lock 0.3–0.7 for tone, wide spread, Hall or Cloud reverb, pressure → density |
+| Init | 4 | Init (a wavetable tape), Init Live, Init Analog, Init Tempo |
+| Pad | 15 | Slow clouds, Lock 0.3–0.7 for tone, wide spread, Hall or Cloud reverb, pressure → density |
 | Texture | 12 | High spray, Vintage stepped tapes, noise and fold, reverse grains, level spray |
 | Drone | 8 | Long tapes, very slow Scan, Lock 1 cores with sprayed halos, reverb freeze on Macro 4 |
 | Keys & Bells | 8 | Perc windows, short envelopes, Fifth/Oct pitch spray, Plate |
@@ -47,8 +48,10 @@ a blob whose `fmt` is not `drizzle` is ignored.
 Rules for every factory patch (from Crest's and Amino's banks):
 - Macros 1–4 do something audible: 1 motion, 2 texture/grit, 3 space, 4 the patch's trick.
 - Pressure and the mod wheel do something.
-- Levels are matched: each patch's `patch_vol` is set so a held C-minor triad renders at
-  −14 LUFS ± 1 (`tools/level/` measures it, as Crest's levelling does).
+- Levels are matched: `tools/level/level.py` sets each patch's `patch_vol` so the mean of the four
+  loudest 250 ms slices of its C minor chord (the golden render) is within 1.5 dB of INIT's, unless
+  that would put its peak above −4 dBFS: percussive and sparse patches are held at that ceiling,
+  a few dB quieter (the tool marks them "peak-limited").
 - Grains stay within +24 semitones of the root at the patch's intended range ([06 §4](06-grain-engine.md)).
 - Golden-tested ([13 §3](13-testing.md)).
 

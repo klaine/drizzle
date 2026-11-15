@@ -12,7 +12,7 @@ Rules (plan/10):
     (plan/16 lists them). A Move page appears once its milestone is built (LEVELS, MILESTONE).
 """
 
-MILESTONE = 3  # pages of later milestones are left out of ui_hierarchy
+MILESTONE = 4  # pages of later milestones are left out of ui_hierarchy
 
 # --- enum option lists (append only) -----------------------------------------------------------
 import json as _json
@@ -108,7 +108,7 @@ def P(key, name, short, kind, mn, mx, default, opts=None, unit=None, step=None, 
 
 
 # --- global and buffer (plan/05) -----------------------------------------------------------------
-P("patch_vol", "Volume", "Vol", "float", 0, 1, 0.7)
+P("patch_vol", "Volume", "Vol", "float", 0, 1, 0.5)  # gain 4 vol^2: 0.5 = unity, 1 = +12 dB
 P("buf_mode", "Buffer Mode", "Mode", "enum", 0, 0, "Scan", opts=BUF_MODES)
 P("buf_len", "Buffer Length", "Len", "float", 0, 1, 0.75)          # 0.5..8 s exp: 0.75 = 4 s
 P("buf_freeze", "Freeze", "Frz", "enum", 0, 0, "Off", opts=OFF_ON, viz={"kind": "switch"})
@@ -360,5 +360,9 @@ for _e in ("ae", "me"):
     DISP[_e + "_d"] = ["env", 22, 1]
     DISP[_e + "_r"] = ["env", 25, 0.6]
 
-# Knobs that raise an on-device card (src/cards.js, M4) while held or turned.
-CARD_KEYS = []
+# Knobs that raise an on-device card (src/cards.js) while held or turned: the values whose meaning
+# needs more than the header's number. Each costs about 29 bytes of chain_params.
+CARD_KEYS = ["gr_size", "gr_dens", "gr_scan", "gr_pspr", "gr_pitch", "buf_len", "src_root", "src_tone",
+             "wt_a_table", "wt_b_table", "wt_a_wave", "wt_b_wave", "sw_time", "sl_rate", "l1_rate", "l2_rate",
+             "flt_cut", "flt_env", "ae_a", "ae_d", "ae_r", "me_a", "me_d", "me_r", "v_glide", "dly_time",
+             "rev_decay", "cho_rate", "an_sync", "an_ddet", "mm_dep", "me_pitch", "l1_pitch", "sw_pitch"]

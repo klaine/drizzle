@@ -142,7 +142,8 @@ value is ignored (Scenes resend every block). `params_apply_dirty` runs once per
   changes level smoothly, not stepwise.
 - **Per voice:** a fixed `0.35` after the VCA. Never normalise by the number of voices (Crest's and
   SchwungFreak's lesson: held notes duck).
-- **Master:** `patch_vol` (`x²` curve, ×2), the soft clipper from Crest, ×32767 with saturation.
+- **Master:** `patch_vol` (gain `4·x²`: 0.5 is unity, 1 is +12 dB, room for sparse and percussive patches to
+  reach the bank's level), the soft clipper from Crest, ×32767 with saturation.
 - **NaN guard:** one finiteness check of the bus per block; on failure zero the bus, reset filter
   and FX state, and count it (`nan_resets` in test builds).
 
