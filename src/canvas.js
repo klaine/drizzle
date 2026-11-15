@@ -68,13 +68,24 @@
     ctx.print(W - tw(ctx, tag), 0, tag, 1);
     ctx.fillRect(0, 9, W, 1, 1);
     var top = 11, bh = Math.max(6, H - top - 1), mid = top + Math.floor(bh / 2);
-    /* the buffer: 128 peak bins, mirrored round the middle, scaled to the width */
-    var nb = bv.length > 6 ? Math.floor((bv.length - 6) / 2) : 0;
+    /* the buffer: 128 peak bins, mirrored round the middle, scaled to the width. The fill's density is
+     * the slice's brightness (buf_view's second 128 values): dark timbres sparse, bright ones solid,
+     * stretched over this buffer's own range so a timbre sweep shows even when the level is flat. */
+    var nb = bv.length > 6 ? Math.min(128, Math.floor((bv.length - 6) / 2)) : 0;
+    var hasB = bv.length >= 6 + 512, lo = 255, hi = 0;
+    if (hasB) for (var j = 0; j < nb; j++) { var bj = hex2(bv, 6 + 256 + 2 * j); if (bj < lo) lo = bj; if (bj > hi) hi = bj; }
+    if (hi - lo < 64) { var c = (hi + lo) / 2; lo = c - 32; hi = c + 32; }
     for (var x = 0; x < W && nb > 0; x++) {
-      var a = hex2(bv, 6 + 2 * Math.min(nb - 1, Math.floor(x * nb / W))) / 255;
+      var bi = Math.min(nb - 1, Math.floor(x * nb / W));
+      var a = hex2(bv, 6 + 2 * bi) / 255;
       var hh = Math.max(0, Math.round(a * (bh / 2 - 1)));
-      if (hh > 0) ctx.fillRect(x, mid - hh, 1, 2 * hh, 1);
-      else ctx.fillRect(x, mid, 1, 1, 1);
+      if (hh <= 0) { ctx.fillRect(x, mid, 1, 1, 1); continue; }
+      var q = hasB ? (hex2(bv, 6 + 256 + 2 * bi) - lo) / (hi - lo) : 1;
+      if (q >= 0.75) { ctx.fillRect(x, mid - hh, 1, 2 * hh, 1); continue; }
+      ctx.fillRect(x, mid - hh, 1, 1, 1); /* the level's outline stays solid */
+      ctx.fillRect(x, mid + hh - 1, 1, 1, 1);
+      var step = q >= 0.5 ? 2 : q >= 0.25 ? 3 : 5;
+      for (var y = mid - hh + 1; y < mid + hh - 1; y++) if ((x + y) % step === 0) ctx.fillRect(x, y, 1, 1, 1);
     }
     /* a tape still rendering: a dotted line along the part not ready yet */
     if (scan && prog < 255) for (var px = Math.round(prog / 255 * W); px < W; px += 3) ctx.fillRect(px, mid, 1, 1, 0);

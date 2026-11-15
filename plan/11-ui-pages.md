@@ -69,9 +69,14 @@ on are the first thing under the hands.
 │ Pos 0.42  Spray 0.18  Dens 24/s        │
 └────────────────────────────────────────┘
 ```
-- Data from `buf_view` and `grain_view`, polled by the canvas. `buf_view` is hex: mode (`L` or `S`),
-  frozen (`0`/`1`), tape-render progress (two digits, `FF` = none), head position (two digits), then
-  128 bins of peak level (two digits each, oldest first in Live): 262 characters. `grain_view` is
+- Data from `buf_view` and `grain_view`, polled by the canvas. `buf_view` is hex: mode (`L`, `S`, or `M`
+  for Sample), frozen (`0`/`1`), tape-render progress (two digits, `FF` = none), head position (two
+  digits), then 128 bins of peak level and 128 of brightness (two digits each, oldest first in Live):
+  518 characters. The Move draws brightness as the fill's dither density (dark timbres sparse,
+  bright ones solid, the level's outline always drawn); the web UI as the bars' colour, from
+  `--dark-tone` to `--bright-tone`. `wave_view` (web UI only: the home page has no room for a fifth
+  extra key) is 64 signed-byte points of about two periods of the material at the newest voice's
+  Position, drawn as a zoom beside the buffer. `grain_view` is
   four hex digits per live grain (up to 32): position along the readable range and the window's
   current level. **VERIFY** the poll rate and that ~300-byte answers are cheap enough at that rate; fall
   back to bins every 4th frame.

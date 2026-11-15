@@ -294,11 +294,13 @@ static void state_load(drz_inst_t *I, const char *blob) {
 
 /* ------------------------------------------------------------------ display (plan/11 section 4) */
 
-/* "<mode><frozen><progress><head>" then 128 bins, all hex: mode L/S, frozen 0/1, progress 00..FF of a
- * running tape render (FF = none), head position 00..FF along the readable range. */
+/* "<mode><frozen><progress><head>" then 128 peak levels and 128 brightnesses, all hex: mode L (Live),
+ * S (Scan) or M (Sample), frozen 0/1, progress 00..FF of a running tape render (FF = none), head
+ * position 00..FF along the readable range. Brightness is where each slice's spectrum mostly sits,
+ * 50 Hz (00) to 10 kHz (FF) on a log scale: a timbre sweep shows even where the level does not move. */
 static int buf_view(const drz_inst_t *I, char *buf, int cap) {
     static const char HEX[] = "0123456789ABCDEF";
-    if (cap < 6 + 2 * DRZ_BINS + 1) return -1;
+    if (cap < 6 + 2 * DRZ_VIEW + 1) return -1;
     const buffer_t *b = &I->buf;
     int scan = b->mode == BUF_MODE_SCAN;
     int smp = I->sp.type == SRC_TYPE_SAMPLE;
@@ -312,12 +314,63 @@ static int buf_view(const drz_inst_t *I, char *buf, int cap) {
     buf[4] = HEX[head >> 4];
     buf[5] = HEX[head & 15];
     const uint8_t *bins = smp ? I->smp_bins : b->bins[scan && b->front >= 0 ? b->front : 0];
-    for (int i = 0; i < DRZ_BINS; i++) {
+    for (int i = 0; i < DRZ_VIEW; i++) {
         buf[6 + 2 * i] = HEX[bins[i] >> 4];
         buf[7 + 2 * i] = HEX[bins[i] & 15];
     }
-    buf[6 + 2 * DRZ_BINS] = 0;
-    return 6 + 2 * DRZ_BINS;
+    buf[6 + 2 * DRZ_VIEW] = 0;
+    return 6 + 2 * DRZ_VIEW;
+}
+
+static float reflect(float x) {
+    float t = x - 2.0f * floorf(x * 0.5f);
+    return t <= 1.0f ? t : 2.0f - t;
+}
+
+/* wave_view: 64 points (signed bytes, hex, 00..FF = -1..1) of the material grains start on now: about
+ * two periods of the source's root at Position (the newest voice's, modulated), for the web UI's zoom.
+ * Bounded work on the audio thread: 64 reads. */
+static int wave_view(const drz_inst_t *I, char *buf, int cap) {
+    static const char HEX[] = "0123456789ABCDEF";
+    if (cap < 129) return -1;
+    const buffer_t *b = &I->buf;
+    int any = 0;
+    for (int i = 0; i < DRZ_VOICES; i++) any |= I->voice[i].active;
+    float pos = any ? I->eff[0] : I->v[P_GR_POS];
+    int smp = I->sp.type == SRC_TYPE_SAMPLE;
+    float root = smp ? I->v[P_SMP_ROOT] : I->v[P_SRC_ROOT];
+    float span = clampf(2.0f * DRZ_FS / semis_to_hz(root), 64.0f, 4096.0f);
+    int32_t len = buffer_readable(I);
+    for (int i = 0; i < 64; i++) {
+        float x = 0.0f;
+        if (len > (int32_t)span + 8) {
+            float off = span * (float)i / 64.0f;
+            if (smp) {
+                int32_t ls = (int32_t)(clampf(I->v[P_SMP_START], 0.0f, 1.0f) * (float)I->smp_frames);
+                int32_t lf = (int32_t)(clampf(I->v[P_SMP_END], 0.0f, 1.0f) * (float)I->smp_frames) - ls;
+                if (lf > (int32_t)span + 8) {
+                    int32_t k = ls + (int32_t)(reflect(pos) * (float)(lf - (int32_t)span - 4) + off);
+                    x = (float)I->smp[clampi(k, 0, I->smp_frames - 1)] * (1.0f / 32768.0f);
+                }
+            } else if (b->mode == BUF_MODE_SCAN) {
+                int32_t k = (int32_t)(reflect(pos) * (float)(len - (int32_t)span - 4) + off);
+                x = I->data[b->front][clampi(k, 0, len - 1)];
+            } else if (b->frozen) {
+                float q = (float)b->lf * (1.0f - (pos - floorf(pos))) + off;
+                int32_t k = b->ls + ((int32_t)q % b->lf);
+                x = I->data[0][k % DRZ_RING];
+            } else {
+                float d = 4.0f + (pos - floorf(pos)) * (float)(len - (int32_t)span - 8) + span - off;
+                int64_t at = b->w - (int64_t)d;
+                x = I->data[0][(int32_t)(((at % DRZ_RING) + DRZ_RING) % DRZ_RING)];
+            }
+        }
+        int v = (int)lrintf(clampf(x, -1.0f, 1.0f) * 127.0f) + 128;
+        buf[2 * i] = HEX[v >> 4];
+        buf[2 * i + 1] = HEX[v & 15];
+    }
+    buf[128] = 0;
+    return 128;
 }
 
 /* ------------------------------------------------------------------ set / get */
@@ -376,6 +429,7 @@ int params_get(drz_inst_t *I, const char *key, char *buf, int buf_len) {
     if (strcmp(key, "buf_view") == 0) return buf_view(I, buf, buf_len);
     if (strcmp(key, "mm_items") == 0) return mm_items(I, buf, buf_len);
     if (strcmp(key, "grain_view") == 0) return grains_view(I, buf, buf_len);
+    if (strcmp(key, "wave_view") == 0) return wave_view(I, buf, buf_len);
     if (strcmp(key, "smp_status") == 0) return smp_status(I, buf, buf_len);
     if (strcmp(key, "smp_file") == 0) return smp_path(I, buf, buf_len);
     if (strcmp(key, "split_voices") == 0) return copy_out("", 0, buf, buf_len);

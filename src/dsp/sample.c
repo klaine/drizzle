@@ -167,15 +167,22 @@ void smp_normalise(int16_t *x, int32_t n) {
     for (int32_t i = 0; i < n; i++) x[i] = (int16_t)lrintf(clampf((float)x[i] * g, -32767.0f, 32767.0f));
 }
 
+/* The display: 128 peak levels, then 128 brightnesses (plan/05 section 5). */
 static void make_bins(const int16_t *x, int32_t n, uint8_t *bins) {
     for (int b = 0; b < DRZ_BINS; b++) {
         int32_t a = (int32_t)((int64_t)n * b / DRZ_BINS), e = (int32_t)((int64_t)n * (b + 1) / DRZ_BINS);
         int pk = 0;
+        float en = 0.0f, de = 0.0f, prev = a < n ? (float)x[a] : 0.0f;
         for (int32_t i = a; i < e; i++) {
             int v = x[i] < 0 ? -x[i] : x[i];
             if (v > pk) pk = v;
+            float f = (float)x[i] * (1.0f / 32768.0f);
+            en += f * f;
+            de += (f - prev) * (f - prev);
+            prev = f;
         }
         bins[b] = (uint8_t)(pk * 255 / 32767);
+        bins[DRZ_BINS + b] = bright_byte(en, de);
     }
 }
 
@@ -186,7 +193,7 @@ typedef struct {
     char path[DRZ_SMP_PATH]; /* written by the audio thread before req moves */
     int norm;
     int32_t frames;          /* results, valid once ready == req */
-    uint8_t bins[DRZ_BINS];
+    uint8_t bins[DRZ_VIEW];
     char status[64];
     int16_t *dst;
 } smp_slot_t;

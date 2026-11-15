@@ -277,57 +277,100 @@ class App {
   bufferView() {
     const c = h("canvas", { width: "1024", height: "200", class: "bufview" });
     const ctx = c.getContext("2d");
+    const z = h("canvas", { width: "320", height: "200", class: "zoomview" });
+    const zctx = z.getContext("2d");
     const status = h("div", { class: "bufstatus" }, "");
+    const hexAt = (s, i) => parseInt(s.substr(i, 2), 16);
+    /* "#rrggbb" -> [r, g, b] (the theme's tones), and a mix of two */
+    const rgb = (v, d) => { const m = /#([0-9a-f]{6})/i.exec(v || ""); const n = parseInt(m ? m[1] : d, 16); return [n >> 16, (n >> 8) & 255, n & 255]; };
+    const mix = (a, b, t) => `rgb(${a.map((x, i) => Math.round(x + (b[i] - x) * t)).join(",")})`;
     const draw = () => {
-      const bv = this.extra.buf_view || "", gv = this.extra.grain_view || "";
+      const bv = this.extra.buf_view || "", gv = this.extra.grain_view || "", wv = this.extra.wave_view || "";
       const W = c.width, H = c.height;
       const css = getComputedStyle(document.body);
-      ctx.fillStyle = css.getPropertyValue("--panel") || "#111";
+      const panel = css.getPropertyValue("--panel").trim() || "#111", accent = css.getPropertyValue("--accent").trim() || "#fc6";
+      const dark = rgb(css.getPropertyValue("--dark-tone"), "3b4cc0"), bright = rgb(css.getPropertyValue("--bright-tone"), "f6c445");
+      ctx.fillStyle = panel;
       ctx.fillRect(0, 0, W, H);
+      let still = true;
       if (bv.length >= 6) {
-        const scan = bv[0] === "S", frozen = bv[1] === "1";
-        const prog = parseInt(bv.slice(2, 4), 16);
-        ctx.fillStyle = css.getPropertyValue("--wave") || "#6af";
-        const n = (bv.length - 6) / 2, bw = W / n;
+        const mode = bv[0], frozen = bv[1] === "1";
+        still = mode !== "L" || frozen;
+        const prog = hexAt(bv, 2);
+        const n = Math.min(128, (bv.length - 6) / 2), bw = W / n;
+        /* level as height, brightness as colour, stretched over this buffer's own range (a timbre
+         * sweep shows even where the level is flat) */
+        const hasB = bv.length >= 6 + 512;
+        let lo = 255, hi = 0;
+        if (hasB) for (let i = 0; i < n; i++) { const b = hexAt(bv, 6 + 256 + 2 * i); lo = Math.min(lo, b); hi = Math.max(hi, b); }
+        if (hi - lo < 64) { const m = (hi + lo) / 2; lo = m - 32; hi = m + 32; }
         for (let i = 0; i < n; i++) {
-          const a = parseInt(bv.substr(6 + 2 * i, 2), 16) / 255;
+          const a = hexAt(bv, 6 + 2 * i) / 255;
           const hh = Math.max(1, a * (H * 0.45));
+          const t = hasB ? Math.min(1, Math.max(0, (hexAt(bv, 6 + 256 + 2 * i) - lo) / (hi - lo))) : 0.5;
+          ctx.fillStyle = mix(dark, bright, t);
           ctx.fillRect(i * bw, H / 2 - hh, bw - 1, 2 * hh);
         }
         if (prog < 255) {
-          ctx.fillStyle = css.getPropertyValue("--accent") || "#fc6";
+          ctx.fillStyle = accent;
           ctx.fillRect(0, H - 4, W * prog / 255, 4);
         }
         const pos = this.values.get("gr_pos"), spr = this.values.get("gr_spray");
-        const x = scan || frozen ? pos : 1 - pos;
-        ctx.strokeStyle = css.getPropertyValue("--accent") || "#fc6";
+        const x = still ? pos : 1 - pos;
+        ctx.strokeStyle = accent;
         ctx.lineWidth = 2;
         ctx.strokeRect((x - spr) * W, 2, Math.max(2, 2 * spr * W), H - 4);
-        status.textContent = `${scan ? "Scan" : "Live"}${frozen ? " · frozen" : ""}${prog < 255 ? " · rendering tape" : ""} · ` +
-          reading(this.byKey.get("buf_len"), this.values.get("buf_len"), this.meta);
+        status.textContent = `${mode === "M" ? "Sample" : mode === "S" ? "Scan" : "Live"}${frozen ? " · frozen" : ""}` +
+          `${prog < 255 ? " · rendering tape" : ""}` + (mode === "M" ? "" : " · " + reading(this.byKey.get("buf_len"), this.values.get("buf_len"), this.meta)) +
+          (hasB ? " · colour: dark to bright timbre" : "");
       } else {
         status.textContent = this.link ? "" : "Press Start audio to play Drizzle in this browser.";
       }
       ctx.fillStyle = css.getPropertyValue("--grain") || "#fff";
       for (let i = 0; i + 4 <= gv.length; i += 4) {
-        const gx = parseInt(gv.substr(i, 2), 16) / 255, ga = parseInt(gv.substr(i + 2, 2), 16) / 255;
+        const gx = hexAt(gv, i) / 255, ga = hexAt(gv, i + 2) / 255;
         ctx.beginPath();
         ctx.arc(gx * W, H - 12 - ga * (H - 24), 3 + 4 * ga, 0, 2 * Math.PI);
         ctx.fill();
       }
+      /* the zoom: about two periods of the material at Position (wave_view) */
+      const ZW = z.width, ZH = z.height;
+      zctx.fillStyle = panel;
+      zctx.fillRect(0, 0, ZW, ZH);
+      zctx.strokeStyle = css.getPropertyValue("--line").trim() || "#333";
+      zctx.lineWidth = 1;
+      zctx.beginPath();
+      zctx.moveTo(0, (ZH - 30) / 2);
+      zctx.lineTo(ZW, (ZH - 30) / 2);
+      zctx.stroke();
+      if (wv.length >= 128) {
+        zctx.strokeStyle = css.getPropertyValue("--wave").trim() || "#6af";
+        zctx.lineWidth = 3;
+        zctx.beginPath();
+        for (let i = 0; i < 64; i++) {
+          const v = (hexAt(wv, 2 * i) - 128) / 127;
+          const px = 8 + i * (ZW - 16) / 63, py = (ZH - 30) / 2 - v * ((ZH - 30) / 2 - 8);
+          if (i) zctx.lineTo(px, py); else zctx.moveTo(px, py);
+        }
+        zctx.stroke();
+      }
+      zctx.fillStyle = css.getPropertyValue("--muted").trim() || "#999";
+      zctx.font = "22px system-ui, sans-serif";
+      zctx.fillText("the wave at Position", 10, ZH - 9);
     };
     /* the engine here is asked 25 times a second; the Move pushes these values itself */
     const loop = async () => {
       if (this.link?.kind === "local") {
-        const [bv, gv] = await Promise.all([this.link.get("buf_view"), this.link.get("grain_view")]);
+        const [bv, gv, wv] = await Promise.all([this.link.get("buf_view"), this.link.get("grain_view"), this.link.get("wave_view")]);
         this.extra.buf_view = bv || "";
         this.extra.grain_view = gv || "";
+        this.extra.wave_view = wv || "";
       }
       draw();
       setTimeout(() => requestAnimationFrame(loop), 40);
     };
     loop();
-    return h("div", { class: "bufbox" }, c, status);
+    return h("div", { class: "bufbox" }, h("div", { class: "bufrow" }, c, z), status);
   }
 
   /* -------------------------------------------------------------- playing (standalone only) */

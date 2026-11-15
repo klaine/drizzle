@@ -74,7 +74,12 @@ Scan uses them as front and back: grains read the front while the back renders. 
   because the two ends of a sweep are unrelated timbres.
 
 ## 5. Display bins
-For the home page ([11 §4](11-ui-pages.md)) the buffer keeps 128 peak bins of the readable range:
+For the home page ([11 §4](11-ui-pages.md)) the buffer keeps 128 bins of the readable range, each with
+its peak level and its **brightness**: the frequency the slice mostly sits at, from its first
+difference's energy against its energy (`bright_byte` in `dsp_util.h`), 50 Hz to 10 kHz on a log
+scale. A synth buffer's level is nearly flat (a periodic wave peaks the same in every slice), so the
+brightness is what shows a timbre sweep. The displays stretch it over the buffer's own range, with
+a minimum span so a static buffer does not show noise.
 - Scan and Sample: computed once per tape or load, during the render (or by the worker).
 - Live: one bin is refreshed per block, round-robin. A bin spans `buf_len / 128` samples (at most
   2 756, a few µs of `fabsf`), so the whole picture follows the ring in 128 blocks, about 0.37 s.

@@ -46,6 +46,18 @@ static inline float sin_cycle(float t) {
     return u * (1.0f + u2 * (-1.6666667e-1f + u2 * (8.3333333e-3f + u2 * (-1.9841270e-4f + u2 * 2.7557319e-6f))));
 }
 
+/* Display brightness of a stretch of audio, 0..255 (plan/05 section 5): from the energy of its first
+ * difference against its energy (for a sine at f that ratio is 2 sin(pi f / fs)), the frequency the
+ * stretch mostly sits at, on a log scale from 50 Hz (0) to 10 kHz (255). Silence reads 0. */
+static inline uint8_t bright_byte(float energy, float diff_energy) {
+    if (energy < 1e-7f) return 0;
+    float r = sqrtf(diff_energy / energy);
+    if (r > 1.999f) r = 1.999f;
+    float hz = 44100.0f / 3.14159265f * asinf(0.5f * r);
+    float b = logf(hz / 50.0f) / logf(200.0f);
+    return (uint8_t)(255.0f * (b < 0.0f ? 0.0f : (b > 1.0f ? 1.0f : b)));
+}
+
 static inline float semis_to_hz(float semis) { return 440.0f * exp2f((semis - 69.0f) / 12.0f); }
 
 /* 4-point, 3rd-order Hermite interpolation between x0 and x1 (xm1, x2 the outer neighbours). */

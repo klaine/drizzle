@@ -102,16 +102,18 @@ check(read("mm_dep", 0.5, { ...defaults, mm_src: "13", mm_dst: "1" }).includes("
 const canvas = load("canvas.js");
 check(canvas.canvas_overlay && typeof canvas.canvas_overlay.drawPage === "function", "canvas.js exports drawPage");
 const hex = (n) => n.toString(16).toUpperCase().padStart(2, "0");
-const bins = Array.from({ length: 128 }, (_, i) => hex(Math.round(255 * Math.abs(Math.sin(i / 9)) * (0.3 + 0.7 * i / 127)))).join("");
+// a flat level (as most synth buffers are) with a brightness ramp, and an older 128-bin answer
+const bins = Array.from({ length: 128 }, () => "FD").join("") + Array.from({ length: 128 }, (_, i) => hex(0x40 + Math.round(i / 2))).join("");
+const oldBins = Array.from({ length: 128 }, (_, i) => hex(Math.round(255 * Math.abs(Math.sin(i / 9))))).join("");
 const grains = [10, 60, 70, 200].map((x, i) => hex(x) + hex(80 + 50 * i)).join("");
 for (const [w, h] of [[128, 40], [128, 34], [120, 44], [128, 64]]) {
-  for (const bv of ["S0FF00" + bins, "L1FF00" + bins, "S040FF" + bins, "", null]) {
+  for (const bv of ["S0FF00" + bins, "L1FF00" + bins, "S040FF" + bins, "M0FF00" + bins, "S0FF00" + oldBins, "", null]) {
     const home = makeCtx(w, h);
     try {
       canvas.canvas_overlay.drawPage(home.ctx, { values: { ...defaults, preset_name: "Glass Tape", buf_view: bv, grain_view: grains }, nowMs: 0 });
     } catch (err) { check(false, `home page ${w}x${h} with ${String(bv).slice(0, 6)} threw ${err.message}`); continue; }
     check(home.outsideCount() === 0 && home.px.some((v) => v), `home page ${w}x${h} (${String(bv).slice(0, 6)}) draws inside its band`);
-    if (pngDir && w === 128 && h === 40 && bv && bv.startsWith("S0")) png(path.join(pngDir, "page_home.png"), home.px, w, h);
+    if (pngDir && w === 128 && h === 40 && bv === "S0FF00" + bins) png(path.join(pngDir, "page_home.png"), home.px, w, h);
   }
   const names = meta.patches.map((p) => p.name), n = names.length;
   for (const index of new Set([0, Math.floor(n / 2), n - 1])) {

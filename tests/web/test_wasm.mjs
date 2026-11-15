@@ -34,6 +34,7 @@ render(400); // the first tape
 x.wa_midi(0x90, 48, 100);
 render(400);
 check(finite && peak > 300, "a note sounds (peak " + peak + ")");
-check(get("buf_view")?.length === 6 + 256, "buf_view");
+check(get("buf_view")?.length === 6 + 512, "buf_view: 128 levels and 128 brightnesses");
+check(get("wave_view")?.length === 128, "wave_view");
 console.log(fails ? `wasm: ${fails} failed` : "wasm ok: init, contract, patch, sound");
 process.exit(fails ? 1 : 0);

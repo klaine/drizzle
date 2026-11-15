@@ -1,11 +1,11 @@
 :root {
   --bg: #f4f5f7; --panel: #ffffff; --ink: #1b1d22; --muted: #6b7280; --line: #d9dce3;
-  --accent: #d9822b; --wave: #4a78c2; --grain: #1b1d22;
+  --accent: #d9822b; --wave: #4a78c2; --grain: #1b1d22; --dark-tone: #3b4a9c; --bright-tone: #e8a33a;
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
   :root { --bg: #121317; --panel: #1b1d23; --ink: #e8e9ed; --muted: #9aa0ab; --line: #2c2f37;
-    --accent: #f0a050; --wave: #6f9de6; --grain: #ffffff; }
+    --accent: #f0a050; --wave: #6f9de6; --grain: #ffffff; --dark-tone: #3d4fae; --bright-tone: #ffd27a; }
 }
 * { box-sizing: border-box; }
 body { margin: 0; padding: 16px; background: var(--bg); color: var(--ink);
@@ -18,7 +18,10 @@ button.start { font-size: 16px; padding: 12px; background: var(--accent); color:
 .bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .bar .name { color: var(--muted); flex: 1; }
 .bufbox { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
-.bufview { width: 100%; height: auto; display: block; border-radius: 4px; }
+.bufrow { display: grid; grid-template-columns: 1fr minmax(120px, 22%); gap: 8px; }
+.bufview, .zoomview { width: 100%; height: auto; display: block; border-radius: 4px; }
+.zoomview { border: 1px solid var(--line); }
+@media (max-width: 520px) { .bufrow { grid-template-columns: 1fr; } .zoomview { max-width: 50%; } }
 .bufstatus { color: var(--muted); font-size: 12px; margin-top: 4px; }
 .kbbox .hint { color: var(--muted); font-size: 12px; margin: 4px 0 0; }
 .keys { display: flex; height: 90px; user-select: none; touch-action: none; }

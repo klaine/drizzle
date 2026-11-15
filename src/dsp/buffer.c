@@ -13,7 +13,7 @@
 #include "drizzle.h"
 #include "dsp_util.h"
 
-static void bins_clear(uint8_t *bins) { memset(bins, 0, DRZ_BINS); }
+static void bins_clear(uint8_t *bins) { memset(bins, 0, DRZ_VIEW); }
 
 /* Start over with nothing readable. The head keeps its absolute position, so grains still fading out
  * (a state load) keep reading what they meant to: new writes land ahead of them. */
@@ -114,20 +114,24 @@ static void live_bin(drz_inst_t *I) {
     int i = b->bin_next;
     b->bin_next = (i + 1) % DRZ_BINS;
     if (len < DRZ_BINS) {
-        b->bins[0][i] = 0;
+        b->bins[0][i] = b->bins[0][DRZ_BINS + i] = 0;
         return;
     }
     int64_t start = (b->frozen ? (int64_t)b->ls + b->lf : b->w) - len + (int64_t)len * i / DRZ_BINS;
     int32_t span = len / DRZ_BINS;
     int32_t slot = (int32_t)(((start % DRZ_RING) + DRZ_RING) % DRZ_RING);
-    float m = 0.0f;
+    float m = 0.0f, e = 0.0f, de = 0.0f, prev = I->data[0][slot];
     const float *d = I->data[0];
     for (int32_t k = 0; k < span; k++) {
-        float a = fabsf(d[slot]);
+        float x = d[slot], a = fabsf(x);
         if (a > m) m = a;
+        e += x * x;
+        de += (x - prev) * (x - prev);
+        prev = x;
         if (++slot == DRZ_RING) slot = 0;
     }
     b->bins[0][i] = (uint8_t)(clampf(m, 0.0f, 1.0f) * 255.0f);
+    b->bins[0][DRZ_BINS + i] = bright_byte(e, de);
 }
 
 static void live_block(drz_inst_t *I, int frames) {
@@ -183,6 +187,8 @@ static void scan_block(drz_inst_t *I, int frames) {
             b->render_len = buffer_len_samples(I);
             source_reset(&I->src_tape, (uint32_t)I->v[P_SRC_SEED]);
             bins_clear(b->bins[b->front < 0 ? 0 : 1 - b->front]);
+            b->acc_e = b->acc_d = b->acc_prev = 0.0f;
+            b->acc_bin = 0;
         }
     }
     if (!b->rendering) return;
@@ -198,12 +204,22 @@ static void scan_block(drz_inst_t *I, int frames) {
         source_render(&I->sp, &I->src_tape, (float)k / (float)len, 0.0f, d + k, n);
         for (int i = 0; i < n; i++) {
             int bi = (int)((int64_t)(k + i) * DRZ_BINS / len);
-            uint8_t a = (uint8_t)(clampf(fabsf(d[k + i]), 0.0f, 1.0f) * 255.0f);
+            if (bi != b->acc_bin) { /* a bin is complete: its brightness */
+                bins[DRZ_BINS + b->acc_bin] = bright_byte(b->acc_e, b->acc_d);
+                b->acc_e = b->acc_d = 0.0f;
+                b->acc_bin = bi;
+            }
+            float x = d[k + i];
+            uint8_t a = (uint8_t)(clampf(fabsf(x), 0.0f, 1.0f) * 255.0f);
             if (a > bins[bi]) bins[bi] = a;
+            b->acc_e += x * x;
+            b->acc_d += (x - b->acc_prev) * (x - b->acc_prev);
+            b->acc_prev = x;
         }
         b->render_k += n;
     }
     if (b->render_k >= len) {
+        bins[DRZ_BINS + b->acc_bin] = bright_byte(b->acc_e, b->acc_d);
         b->tape_len[back] = len;
         b->front = back;
         b->rendering = 0;

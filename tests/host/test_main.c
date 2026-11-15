@@ -617,14 +617,37 @@ static void test_scan(void) {
     CHECK(b->tape_renders == renders + 1, "release renders the change");
     CHECK(I->guard_violations == 0, "guard: %u", I->guard_violations);
     /* buf_view */
-    char v[512];
+    char v[1024];
     int n = api->get_param(h, "buf_view", v, sizeof v);
-    CHECK(n == 6 + 2 * DRZ_BINS && v[0] == 'S' && v[2] == 'F' && v[3] == 'F', "buf_view: %.12s… (%d)", v, n);
+    CHECK(n == 6 + 2 * DRZ_VIEW && v[0] == 'S' && v[2] == 'F' && v[3] == 'F', "buf_view: %.12s… (%d)", v, n);
     int nonzero = 0;
-    for (int i = 6; i < n; i += 2) nonzero += !(v[i] == '0' && v[i + 1] == '0');
+    for (int i = 6; i < 6 + 2 * DRZ_BINS; i += 2) nonzero += !(v[i] == '0' && v[i + 1] == '0');
     CHECK(nonzero > 100, "the tape's bins are drawn (%d)", nonzero);
+    n = api->get_param(h, "wave_view", v, sizeof v);
+    int lo = 255, hi = 0;
+    for (int i = 0; i + 1 < n; i += 2) {
+        int x = (int)strtol((char[3]){v[i], v[i + 1], 0}, NULL, 16);
+        lo = x < lo ? x : lo;
+        hi = x > hi ? x : hi;
+    }
+    CHECK(n == 128 && hi - lo > 100, "wave_view shows the wave at Position (%d, range %d)", n, hi - lo);
     n = api->get_param(h, "grain_view", v, sizeof v);
     CHECK(n > 0 && n % 4 == 0, "grain_view (%d)", n);
+    /* brightness: a tape whose Tone sweeps from dark to open reads darker at the start than at the end */
+    {
+        void *h3 = mk();
+        drz_inst_t *I3 = drz_inst(h3);
+        sp(h3, "state", "{\"fmt\":\"drizzle\",\"v\":\"1\",\"src_type\":\"Analog\",\"sw_timb\":\"0\",\"src_tone\":\"0\",\"sw_tone\":\"1\"}");
+        while (I3->buf.tape_renders == 0) render(h3, 128, NULL, NULL);
+        const uint8_t *bb = I3->buf.bins[I3->buf.front];
+        int first = 0, last = 0;
+        for (int i = 0; i < 16; i++) {
+            first += bb[DRZ_BINS + i];
+            last += bb[DRZ_BINS + DRZ_BINS - 16 + i];
+        }
+        CHECK(last > first + 16 * 40, "brightness rises with the Tone sweep (%d -> %d)", first / 16, last / 16);
+        api->destroy_instance(h3);
+    }
     /* switching modes */
     sp(h, "buf_mode", "Live");
     render(h, SEC, L, NULL);
@@ -1202,7 +1225,7 @@ static void test_samples(void) {
         note_off(h, note);
         render(h, 3 * SEC, NULL, NULL);
     }
-    char vbuf[300];
+    char vbuf[600];
     api->get_param(h, "buf_view", vbuf, sizeof vbuf);
     CHECK(vbuf[0] == 'M' && strstr(vbuf + 6, "00000000") == NULL, "buf_view draws the sample: %.12s", vbuf);
     /* the path is saved, not the audio, and a reload loads it again */

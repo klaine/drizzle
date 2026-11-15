@@ -16,7 +16,7 @@ ALLOWED = {
     "strtof", "strtol", "atoi", "snprintf", "strchr",
     # libm
     "sinf", "cosf", "sincosf", "tanf", "expf", "exp2f", "logf", "powf", "sqrtf", "floorf", "fabsf", "roundf",
-    "lrintf", "log1pf", "fminf", "fmaxf", "tanhf", "fmod", "log2f",
+    "lrintf", "log1pf", "fminf", "fmaxf", "tanhf", "fmod", "log2f", "asinf",
     # compiler / runtime plumbing
     "__stack_chk_fail", "__stack_chk_guard", "__cxa_finalize", "__gmon_start__",
     "_ITM_deregisterTMCloneTable", "_ITM_registerTMCloneTable", "__errno_location",

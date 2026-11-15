@@ -28,6 +28,7 @@
 #define DRZ_TAPE_CHUNK 1024      /* Scan tape samples rendered per block: 8x realtime (plan/05 section 4) */
 #define DRZ_TAPE_DEBOUNCE 2646   /* 60 ms */
 #define DRZ_BINS 128             /* display bins (plan/05 section 5) */
+#define DRZ_VIEW (2 * DRZ_BINS)  /* a display: 128 peak levels, then 128 brightnesses */
 #define DRZ_DENS_UNISON 3        /* extra detuned copies of Analog osc A (an_dens) */
 #define DRZ_STEP_NEW INT64_MIN   /* voice_t.last_step: resolve against the grid at the next sub-block */
 
@@ -91,8 +92,10 @@ typedef struct {
     int32_t debounce;    /* samples until a requested render starts; 0 = none pending */
     int tape_renders;    /* completed renders (tests) */
     /* display */
-    uint8_t bins[2][DRZ_BINS]; /* Live and the front tape use bins[front or 0]; the render fills the other */
+    uint8_t bins[2][DRZ_VIEW]; /* Live and the front tape use bins[front or 0]; the render fills the other */
     int bin_next;
+    float acc_e, acc_d, acc_prev; /* the tape render's running energies for the bin it is in */
+    int acc_bin;
 } buffer_t;
 
 /* ------------------------------------------------------------------ grains (plan/06) */
@@ -184,7 +187,7 @@ typedef struct drz_inst {
     /* the Sample source (sample.c) */
     int smp_ready;                          /* smp[] holds a sample the grains may read */
     int32_t smp_frames;
-    uint8_t smp_bins[DRZ_BINS];
+    uint8_t smp_bins[DRZ_VIEW];
     int64_t step_cur;                       /* the grid step the sub-block starts in */
     float step_frac;                        /* how far into it, 0..1 */
     float vol_cur;
