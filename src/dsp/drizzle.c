@@ -14,6 +14,7 @@
 
 #include "drizzle.h"
 #include "dsp_util.h"
+#include "sample.h"
 
 #define VOICE_GAIN 0.35f /* fixed per voice, never normalised by the voice count (plan/03 section 5) */
 
@@ -42,6 +43,7 @@ static drz_inst_t *claim(drz_inst_t *p) {
     p->expr = p->s_expr = 1.0f;
     p->scale_mask = 0x0FFF;
     params_defaults(p);
+    smp_attach(p); /* also starts the sample loader thread, once per process */
     source_prepare(p);
     buffer_reset(p);
     grains_reset(p);
@@ -426,6 +428,7 @@ static void drz_render_block(void *instance, int16_t *out, int frames) {
 #endif
     uint64_t fp = ftz_enter();
     if (I->pdirty) apply_params(I);
+    smp_block(I);
     if (g_host && g_host->get_bpm) {
         float bpm = g_host->get_bpm();
         I->bpm = bpm > 20.0f && bpm < 400.0f ? bpm : 120.0f;

@@ -12,7 +12,7 @@ Rules (plan/10):
     (plan/16 lists them). A Move page appears once its milestone is built (LEVELS, MILESTONE).
 """
 
-MILESTONE = 4  # pages of later milestones are left out of ui_hierarchy
+MILESTONE = 5  # pages of later milestones are left out of ui_hierarchy
 
 # --- enum option lists (append only) -----------------------------------------------------------
 import json as _json
@@ -296,7 +296,7 @@ P("rev_hpf", "Reverb HiPass", "HiPas", "float", 0, 1, 0.0, cp=False)
 P("rev_mdep", "Reverb Mod Depth", "MDep", "float", 0, 1, 0.504, cp=False)
 P("rev_mrate", "Reverb Mod Rate", "MRate", "float", 0, 1, 0.031, cp=False)
 
-# --- sample source (plan/04 section 5, M5; smp_file is a filepath entry gen.py adds then) ----------
+# --- sample source (plan/04 section 5; smp_file is a filepath entry gen.py adds, the path is in the blob)
 P("smp_root", "Sample Root", "Root", "int", 0, 127, 60)
 P("smp_start", "Sample Start", "Start", "float", 0, 1, 0.0)
 P("smp_end", "Sample End", "End", "float", 0, 1, 1.0)
@@ -317,7 +317,7 @@ LEVELS = [
     ("wavetable_mod", "Wavetable Mod", ["wt_xmod", "wt_xamt"], 2),
     ("analog", "Analog", ["an_a_wave", "an_a_shape", "an_b_wave", "an_b_shape", "an_b_semi", "an_b_fine", "an_b_lvl", "an_noise"], 1),
     ("analog_mod", "Analog Mod", ["an_dens", "an_ddet", "an_fm", "an_sync"], 1),
-    ("sample", "Sample", ["smp_root", "smp_start", "smp_end", "smp_norm"], 5),
+    ("sample", "Sample", ["smp_file", "smp_root", "smp_start", "smp_end", "smp_norm"], 5),
     ("sweep", "Sweep", ["sw_time", "sw_curve", "sw_mode", "sw_timb", "sw_fold", "sw_pitch", "sw_tone"], 1),
     ("source_lfo", "Source LFO", ["sl_wave", "sl_rate", "sl_sync", "sl_timb", "sl_fold", "sl_pitch", "sl_tone"], 2),
     ("grains", "Grains", ["gr_pos", "gr_spray", "gr_size", "gr_dens", "gr_jit", "gr_scan", "gr_win", "gr_lock"], 1),

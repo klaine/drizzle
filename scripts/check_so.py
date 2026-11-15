@@ -26,8 +26,14 @@ ALLOWED = {
 }
 # The first move_info read (src/dsp/scale.c via move_info.h), in create_instance: never on the audio callback.
 ALLOWED |= {"dlsym", "shm_open", "mmap", "mmap64", "close"}
-# The sample loader thread (M5, plan/04 section 5) will add pthread_*, fopen, fread, fclose,
-# opendir and readdir here, with a comment saying they never run on the audio callback.
+# Used only by the sample loader thread (src/dsp/sample.c), never on the audio callback: it is started
+# from create_instance, reads the chosen .wav file and resamples it into the instance's buffer.
+WORKER = {
+    "pthread_create", "pthread_attr_init", "pthread_attr_destroy", "pthread_attr_setstacksize", "pthread_join",
+    "sched_setaffinity", "nanosleep", "fopen", "fopen64", "fread", "fclose", "fseek", "ftell", "fseeko", "ftello",
+    "fseeko64", "ftello64",
+}
+ALLOWED |= WORKER
 
 
 def main(path):

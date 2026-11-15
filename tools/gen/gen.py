@@ -127,6 +127,9 @@ def chain_params(nfactory):
         out.append(e)
     out.append({"key": "preset", "name": "Factory Patch", "type": "int", "min": 0, "max": max(0, nfactory - 1),
                 "step": 1})
+    # The Sample source's file browser (src/dsp/sample.c reads the file on its worker thread).
+    out.append({"key": "smp_file", "name": "Sample", "type": "filepath", "root": "/data/UserData/UserLibrary/Drizzle",
+                "filter": ".wav"})
     # Module-drawn pages (src/canvas.js): the home page in front of the root knobs, and the patch browser.
     # The home page reads the buffer and the grains (plan/11 section 4); Position, Spray and Freeze reach
     # it as root knobs.

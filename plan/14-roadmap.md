@@ -69,10 +69,12 @@ Move, state round-trips, `cpu_us` ≤ 500 µs with 8 voices and 64 grains.
 device finds no unusable page.
 
 ## M5 — Sample mode
-- [ ] `sample.c`: WAV parser, resampler, loader thread with the per-slot handshake.
-- [ ] Sample page, `smp_status`, the browser's drop-in loader with IndexedDB.
-- [ ] `check_so.py` whitelist for the worker; sample suite.
-- [ ] Sample category patches with our own or CC0 audio, if a good set exists.
+- [x] `sample.c`: WAV parser (PCM 16/24/32, float, extensible, 1–8 channels), 16-tap sinc resampler,
+      loader thread with the per-slot handshake.
+- [x] Sample page with the file browser, `smp_status`, the browser's file picker with IndexedDB.
+- [x] `check_so.py` whitelist for the worker; sample suite (decoder, resampler, loader, swap while
+      playing, missing file, state round trip).
+- [ ] Sample category patches with our own or CC0 audio, if a good set exists. None yet.
 
 **Accept:** a WAV copied to `UserLibrary/Drizzle` loads from the file browser without an audible
 glitch in other tracks, survives a Set reload, and a missing file fails cleanly.

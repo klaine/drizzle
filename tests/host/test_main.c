@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 200809L /* nanosleep: the sample tests wait for the loader thread */
 /* Native tests: drive Drizzle through the Schwung plugin API with a fake host (plan/13 section 2).
  * Built with -DDRZ_TEST, which tags every Live ring sample with its absolute position so the read
  * guard is checked on every point a grain reads, and counts tape grains that would read past a tape's
@@ -11,6 +12,8 @@
 
 #include "drizzle.h"
 #include "dsp_util.h"
+#include "sample.h"
+#include <time.h>
 
 static int g_pass, g_fail;
 #define CHECK(cond, ...)                                                   \
@@ -1101,6 +1104,133 @@ static void test_reverb_modes(void) {
     api->destroy_instance(h);
 }
 
+/* ------------------------------------------------------------------ M5: samples */
+
+/* A WAV file in memory: `bits` 16 / 24 / 32 (float when fmt 3), `ch` channels of a sine at `hz`. */
+static int make_wav(uint8_t *b, int fmt, int bits, int ch, int rate, float hz, int frames, int extensible) {
+    int bpf = bits / 8 * ch, data = frames * bpf, fmtlen = extensible ? 40 : 16, p = 0;
+#define PUT32(v) do { uint32_t x_ = (uint32_t)(v); for (int k_ = 0; k_ < 4; k_++) b[p++] = (uint8_t)(x_ >> (8 * k_)); } while (0)
+#define PUT16(v) do { uint32_t x_ = (uint32_t)(v); b[p++] = (uint8_t)x_; b[p++] = (uint8_t)(x_ >> 8); } while (0)
+    memcpy(b + p, "RIFF", 4); p += 4; PUT32(4 + 8 + fmtlen + 8 + data);
+    memcpy(b + p, "WAVE", 4); p += 4;
+    memcpy(b + p, "LIST", 4); p += 4; PUT32(4); memcpy(b + p, "INFO", 4); p += 4; /* a chunk to skip */
+    memcpy(b + p, "fmt ", 4); p += 4; PUT32(fmtlen);
+    PUT16(extensible ? 0xFFFE : fmt); PUT16(ch); PUT32(rate); PUT32(rate * bpf); PUT16(bpf); PUT16(bits);
+    if (extensible) { PUT16(22); PUT16(bits); PUT32(0); PUT16(fmt); for (int k = 0; k < 14; k++) b[p++] = 0; }
+    memcpy(b + p, "data", 4); p += 4; PUT32(data);
+    for (int i = 0; i < frames; i++)
+        for (int c = 0; c < ch; c++) {
+            float x = 0.5f * sinf(2.0f * DRZ_PI * hz * (float)i / (float)rate);
+            if (fmt == 3) { uint32_t u; memcpy(&u, &x, 4); PUT32(u); }
+            else if (bits == 16) PUT16((uint16_t)(int16_t)lrintf(x * 32767.0f));
+            else if (bits == 24) { int32_t v = (int32_t)lrintf(x * 8388607.0f); b[p++] = (uint8_t)v; b[p++] = (uint8_t)(v >> 8); b[p++] = (uint8_t)(v >> 16); }
+            else PUT32((uint32_t)(int32_t)lrintf(x * 2147483647.0f));
+        }
+#undef PUT32
+#undef PUT16
+    return p;
+}
+
+static int wait_status(void *h, const char *prefix, int ms) {
+    char st[96];
+    for (int t = 0; t < ms; t += 10) {
+        render(h, 128, NULL, NULL);
+        api->get_param(h, "smp_status", st, sizeof st);
+        if (strncmp(st, prefix, strlen(prefix)) == 0) return 1;
+        struct timespec ts = {0, 10 * 1000 * 1000};
+        nanosleep(&ts, NULL);
+    }
+    return 0;
+}
+
+static void test_samples(void) {
+    printf("samples\n");
+    static uint8_t wav[4 * 96000 * 8];
+    static int16_t out[200000];
+    const char *err = NULL;
+    int32_t rate = 0;
+    struct { int fmt, bits, ch, ext; } F[] = {{1, 16, 1, 0}, {1, 24, 2, 0}, {1, 32, 1, 0}, {3, 32, 2, 0}, {1, 16, 2, 1}, {3, 32, 1, 1}};
+    for (size_t k = 0; k < sizeof F / sizeof *F; k++) {
+        int len = make_wav(wav, F[k].fmt, F[k].bits, F[k].ch, 44100, 1000.0f, 44100, F[k].ext);
+        int32_t n = wav_decode(wav, len, out, 200000, &rate, &err);
+        float pk = 0;
+        for (int i = 0; i < n; i++) pk = fmaxf(pk, fabsf((float)out[i] / 32768.0f));
+        static float fl[44100];
+        for (int i = 0; i < n && i < 44100; i++) fl[i] = (float)out[i] / 32768.0f;
+        CHECK(n == 44100 && rate == 44100 && fabsf(pk - 0.5f) < 0.01f && fabsf(zc_hz(fl, 44100) - 1000.0f) < 2.0f,
+              "decode fmt %d, %d-bit, %d ch%s: %d frames, peak %.3f", F[k].fmt, F[k].bits, F[k].ch, F[k].ext ? " (extensible)" : "", n, (double)pk);
+    }
+    int len = make_wav(wav, 1, 16, 1, 44100, 1000.0f, 1000, 0);
+    CHECK(wav_decode(wav, 20, out, 1000, &rate, &err) < 0, "a truncated header fails (%s)", err ? err : "?");
+    wav[0] = 'X';
+    CHECK(wav_decode(wav, len, out, 1000, &rate, &err) < 0, "not RIFF fails");
+    wav[0] = 'R';
+    CHECK(wav_decode(wav, len - 1500, out, 1000, &rate, &err) >= 0, "a cut data chunk decodes what is there");
+    /* resampling keeps the pitch */
+    for (int r = 0; r < 2; r++) {
+        int sr = r ? 96000 : 22050;
+        int n = wav_decode(wav, make_wav(wav, 1, 16, 1, sr, 1000.0f, sr, 0), out, 200000, &rate, &err);
+        static int16_t rs[50000];
+        static float fl[50000];
+        int32_t m = smp_resample(out, n, sr, rs, 50000);
+        for (int i = 0; i < m; i++) fl[i] = (float)rs[i] / 32768.0f;
+        CHECK(abs(m - 44100) < 2 && fabsf(zc_hz(fl + 100, m - 200) - 1000.0f) < 3.0f, "%d Hz -> 44.1 kHz: %d frames, %.1f Hz", sr, m,
+              (double)zc_hz(fl + 100, m - 200));
+    }
+    /* the loader thread: a 440 Hz file played at its root and an octave up */
+    void *h = mk();
+    drz_inst_t *I = drz_inst(h);
+    len = make_wav(wav, 1, 16, 1, 48000, 440.0f, 2 * 48000, 0);
+    FILE *f = fopen("build/test_a440.wav", "wb");
+    CHECK(f != NULL, "write the test file");
+    if (!f) return;
+    fwrite(wav, 1, (size_t)len, f);
+    fclose(f);
+    sp(h, "state", "{\"fmt\":\"drizzle\",\"v\":\"1\",\"src_type\":\"Sample\",\"smp_root\":\"69\",\"rev_lvl\":\"0\",\"gr_spray\":\"0\",\"gr_size\":\"0.7\",\"gr_dens\":\"0.6\",\"gr_lock\":\"1\",\"v_flav\":\"0\"}");
+    sp(h, "smp_file", "build/test_a440.wav");
+    CHECK(wait_status(h, "ready:", 3000), "the sample loads");
+    char st[96];
+    api->get_param(h, "smp_status", st, sizeof st);
+    CHECK(I->smp_ready && abs(I->smp_frames - 88200) < 4, "status %s, %d frames at 44.1 kHz", st, I->smp_frames);
+    for (int k = 0; k < 2; k++) {
+        int note = 69 + 12 * k;
+        note_on(h, note, 100);
+        render(h, 3 * SEC, L, NULL);
+        double fq = 440.0 * (k + 1);
+        double on = band(L + SEC, 2 * SEC, fq), lo = band(L + SEC, 2 * SEC, fq * pow(2.0, -1.0 / 12.0)), hi = band(L + SEC, 2 * SEC, fq * pow(2.0, 1.0 / 12.0));
+        CHECK(on > 100.0 * lo && on > 100.0 * hi, "note %d plays the sample at %.0f Hz", note, fq);
+        note_off(h, note);
+        render(h, 3 * SEC, NULL, NULL);
+    }
+    char vbuf[300];
+    api->get_param(h, "buf_view", vbuf, sizeof vbuf);
+    CHECK(vbuf[0] == 'M' && strstr(vbuf + 6, "00000000") == NULL, "buf_view draws the sample: %.12s", vbuf);
+    /* the path is saved, not the audio, and a reload loads it again */
+    static char blob[16384];
+    api->get_param(h, "state", blob, sizeof blob);
+    CHECK(strstr(blob, "\"smp_file\":\"build/test_a440.wav\"") != NULL, "the state holds the path");
+    sp(h, "state", blob);
+    CHECK(!I->smp_ready && wait_status(h, "ready:", 3000) && I->smp_ready, "a state load reloads the file");
+    /* swapping the file while a note plays: old grains fade first, nothing reads a half-written sample */
+    note_on(h, 69, 100);
+    render(h, SEC / 2, NULL, NULL);
+    sp(h, "smp_file", "build/test_a440.wav");
+    CHECK(wait_status(h, "ready:", 3000), "a new file while playing");
+    render(h, SEC, L, NULL);
+    CHECK(all_finite(L, SEC) && rms(L + SEC / 2, SEC / 2) > 0.005f, "and it plays on");
+    note_off(h, 69);
+    sp(h, "smp_file", "build/no_such_file.wav");
+    CHECK(wait_status(h, "error:missing", 2000) && !I->smp_ready, "a missing file fails cleanly");
+    note_on(h, 69, 100);
+    render(h, SEC / 2, L, NULL);
+    CHECK(peak(L, SEC / 2) == 0.0f, "and plays nothing");
+    note_off(h, 69);
+    sp(h, "preset", "0");
+    CHECK(wait_status(h, "none", 2000), "a factory patch clears the sample");
+    CHECK(I->guard_violations == 0, "no read outside the sample region (%u)", I->guard_violations);
+    api->destroy_instance(h);
+}
+
 int main(void) {
     memset(&host, 0, sizeof host);
     host.get_bpm = fake_bpm;
@@ -1129,6 +1259,7 @@ int main(void) {
     test_tempo();
     test_modulation();
     test_reverb_modes();
+    test_samples();
     printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

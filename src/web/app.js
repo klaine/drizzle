@@ -126,7 +126,7 @@ class LocalLink {
 
   send(key, value) {
     this.engine.set(key, value);
-    if (key === "preset" || key === "state" || key === "pb_index") this.pull();
+    if (key === "preset" || key === "state" || key === "pb_index") this.pull().then(() => this.onLoad?.());
     else if (key === "mm_slot" || key === "mm_sel" || key === "mm_clear") this.pull(["mm_src", "mm_via", "mm_dst", "mm_dep", "mm_slot", "mm_clear"]);
     clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(async () => {
@@ -139,6 +139,33 @@ class LocalLink {
 
   get(key) { return this.engine.get(key); }
 }
+
+/* ------------------------------------------------------------------ samples kept in this browser */
+
+/* Sample mode in the browser: decoded files, by name, in IndexedDB (plan/04 section 5). */
+const samples = {
+  db: null,
+  async open() {
+    if (this.db || !window.indexedDB) return this.db;
+    this.db = await new Promise((res) => {
+      const rq = indexedDB.open("drizzle.samples", 1);
+      rq.onupgradeneeded = () => rq.result.createObjectStore("s");
+      rq.onsuccess = () => res(rq.result);
+      rq.onerror = () => res(null);
+    });
+    return this.db;
+  },
+  async put(name, data) {
+    const db = await this.open();
+    if (!db) return;
+    await new Promise((res) => { const t = db.transaction("s", "readwrite"); t.objectStore("s").put(data, name); t.oncomplete = t.onerror = res; });
+  },
+  async get(name) {
+    const db = await this.open();
+    if (!db) return null;
+    return new Promise((res) => { const rq = db.transaction("s").objectStore("s").get(name); rq.onsuccess = () => res(rq.result || null); rq.onerror = () => res(null); });
+  },
+};
 
 /* ------------------------------------------------------------------ the app */
 
@@ -178,7 +205,40 @@ class App {
     for (const fn of this.controls.get(key) || []) fn(v);
   }
 
+  /* The Sample page's file: a picker here, the path the Move's own browser chose on a Move. */
+  sampleControl() {
+    const out = h("output", {});
+    const lab = h("label", {}, "File");
+    const file = h("input", { type: "file", accept: "audio/*,.wav", hidden: "" });
+    const pick = h("button", { type: "button", class: "chip", onclick: () => file.click() }, "Load sample…");
+    file.addEventListener("change", async () => {
+      const f = file.files[0];
+      file.value = "";
+      if (!f || !this.engine) return;
+      out.textContent = "Decoding " + f.name + "…";
+      try {
+        const data = await this.engine.decode(await f.arrayBuffer());
+        await samples.put(f.name, new Float32Array(data));
+        this.engine.loadSample(new Float32Array(data), f.name);
+        this.extra.smp_file = f.name;
+        if (this.values.get("src_type") !== 2) this.set("src_type", 2);
+        out.textContent = f.name + " · " + (data.length / 44100).toFixed(1) + " s";
+      } catch (err) { out.textContent = "Could not read " + f.name + ": " + err.message; }
+    });
+    this.listeners.add(() => { if (this.extra.smp_file !== undefined && !out.textContent.startsWith("Decoding")) out.textContent = this.extra.smp_file || "no sample"; });
+    return h("div", { class: "ctl" }, lab, this.link?.kind === "device" || window.schwungRemote ? h("span", {}) : pick, file, out);
+  }
+
+  /** After a patch or state load in the browser: hand the engine the sample the patch names, if this browser has it. */
+  async restoreSample() {
+    const name = this.extra.smp_file;
+    if (!name || !this.engine) return;
+    const data = await samples.get(name);
+    if (data) this.engine.loadSample(new Float32Array(data), name);
+  }
+
   control(key, label) {
+    if (key === "smp_file") return this.sampleControl();
     const p = this.byKey.get(key);
     if (!p) return h("div", { class: "ctl missing" }, key);
     const out = h("output", {});
@@ -417,8 +477,10 @@ class App {
       this.engine = await Engine.start(new URL("../engine/", here).href);
       const link = new LocalLink(this.engine, this.meta);
       link.onValues((vals) => this.receive(vals));
+      link.onLoad = () => this.restoreSample();
       this.link = link;
       await link.init();
+      this.restoreSample();
       this.midiIn();
       button.remove();
     } catch (err) {

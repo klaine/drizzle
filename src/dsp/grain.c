@@ -116,8 +116,9 @@ static void spawn_one(drz_inst_t *I, voice_t *v, int vi, int off, int64_t now) {
 
     /* The pitch the material was recorded at: the root, or in Live with Track Notes the pitch stored
      * with the 16 samples the grain starts on. */
-    float root = pv[P_SRC_ROOT];
-    int live_mode = b->mode == BUF_MODE_LIVE;
+    int sample = (int)pv[P_SRC_TYPE] == SRC_TYPE_SAMPLE;
+    float root = sample ? pv[P_SMP_ROOT] : pv[P_SRC_ROOT];
+    int live_mode = b->mode == BUF_MODE_LIVE && !sample;
     if (live_mode && pv[P_SRC_TRACK] >= 0.5f) {
         float leff = (float)buffer_readable(I);
         float w = where - v->scan_off;
@@ -142,7 +143,45 @@ static void spawn_one(drz_inst_t *I, voice_t *v, int vi, int off, int64_t now) {
 #ifdef DRZ_TEST
     int64_t abs_pos = 0;
 #endif
-    if (b->mode == BUF_MODE_SCAN) {
+    if (sample) {
+        /* The Sample source: the region smp_start..smp_end of the file, read like a tape (plan/04 section 5). */
+        if (!I->smp_ready) {
+            I->grains_skipped++;
+            return;
+        }
+        float a = clampf(pv[P_SMP_START], 0.0f, 1.0f), e = clampf(pv[P_SMP_END], 0.0f, 1.0f);
+        if (e < a) {
+            float t = a;
+            a = e;
+            e = t;
+        }
+        ls = (int32_t)(a * (float)I->smp_frames);
+        lf = (int32_t)((e - a) * (float)I->smp_frames);
+        if (lf < 512) {
+            I->grains_skipped++;
+            return;
+        }
+        bufi = 2;
+        float span = len * s;
+        if (span > (float)lf - 16.0f) {
+            len = ((float)lf - 16.0f) / s;
+            if (len < 64.0f) {
+                I->grains_skipped++;
+                return;
+            }
+            span = len * s;
+        }
+        float lo = 4.0f, hi = (float)lf - span - 8.0f;
+        float start = lo + reflect01(where + v->scan_off) * (hi - lo);
+        if (rev) start += span;
+        if (lock > 0.0f) {
+            start += lock * lock_shift((double)start, sinc, T, P);
+            start = rev ? clampf(start, lo + span, hi + span) : clampf(start, lo, hi);
+        }
+        float qi = floorf(start);
+        q = (int32_t)qi;
+        frac = start - qi;
+    } else if (b->mode == BUF_MODE_SCAN) {
         /* A tape: Position runs along the sweep; Scan and Spray reflect off the ends. */
         if (b->front < 0) {
             I->grains_skipped++;
@@ -243,7 +282,7 @@ static void spawn_one(drz_inst_t *I, voice_t *v, int vi, int off, int64_t now) {
     g->voice = (uint8_t)vi;
     g->live = (uint8_t)live;
     g->buf = (uint8_t)bufi;
-    g->tape = (uint8_t)(b->mode == BUF_MODE_SCAN);
+    g->tape = (uint8_t)(b->mode == BUF_MODE_SCAN || sample);
     g->win = (uint8_t)clampi((int)pv[P_GR_WIN], 0, DRZ_WIN_COUNT - 1);
 #ifdef DRZ_TEST
     g->abs = abs_pos;
@@ -332,7 +371,38 @@ static inline int32_t wrap(int32_t x, int32_t m) { return x < 0 ? x + m : (x >= 
  * The fast path reads straight from the buffer. It is taken when every point the grain reads in this
  * sub-block lies inside its region and inside the physical ring, so no index needs wrapping, and no
  * kill fade is running. Otherwise every point is wrapped (the slow path). */
+/* A Sample grain: int16 reads inside its region, which spawn_one keeps the grain within. */
+static int render_s16(drz_inst_t *I, grain_t *g, float *l, float *r, int i, int n) {
+    const int16_t *src = I->smp + g->ls;
+    const float *wt = DRZ_WINDOWS[g->win];
+    const int32_t lf = g->lf;
+    const float sc = 1.0f / 32768.0f;
+    int m = n - i;
+    if (m > g->len - g->age) m = g->len - g->age;
+    for (int k = 0; k < m; k++) {
+        int32_t q0 = (int32_t)(g->pos >> 32);
+#ifdef DRZ_TEST
+        if (q0 < 1 || q0 + 2 >= lf) I->guard_violations++; /* a read past the region's ends */
+#endif
+        int32_t a = clampi(q0 - 1, 0, lf - 1), b = clampi(q0, 0, lf - 1), c = clampi(q0 + 1, 0, lf - 1), e = clampi(q0 + 2, 0, lf - 1);
+        float t = (float)(uint32_t)g->pos * FRAC_SCALE;
+        float w = win_at(wt, g->wpos);
+        if (g->fade) {
+            w *= (float)g->fade * (1.0f / (float)DRZ_KILL_FADE);
+            if (--g->fade == 0) return 1;
+        }
+        float x = hermite4((float)src[a] * sc, (float)src[b] * sc, (float)src[c] * sc, (float)src[e] * sc, t) * w;
+        l[i + k] += x * g->gl;
+        r[i + k] += x * g->gr;
+        g->pos += g->dpos;
+        g->wpos += g->winc;
+        g->age++;
+    }
+    return g->age >= g->len;
+}
+
 static int render_one(drz_inst_t *I, grain_t *g, float *l, float *r, int i, int n, int64_t now0) {
+    if (g->buf == 2) return render_s16(I, g, l, r, i, n);
     const float *d = I->data[g->buf];
     const float *wt = DRZ_WINDOWS[g->win];
     const int32_t ls = g->ls, lf = g->lf;

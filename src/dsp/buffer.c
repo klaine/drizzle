@@ -38,6 +38,7 @@ int32_t buffer_len_samples(const drz_inst_t *I) {
 
 int32_t buffer_readable(const drz_inst_t *I) {
     const buffer_t *b = &I->buf;
+    if (I->sp.type == SRC_TYPE_SAMPLE) return I->smp_ready ? I->smp_frames : 0;
     if (b->mode == BUF_MODE_SCAN) return b->front >= 0 ? b->tape_len[b->front] : 0;
     if (b->frozen) return b->lf;
     int32_t n = buffer_len_samples(I);
@@ -211,6 +212,7 @@ static void scan_block(drz_inst_t *I, int frames) {
 }
 
 void buffer_block(drz_inst_t *I, int frames) {
+    if (I->sp.type == SRC_TYPE_SAMPLE) return; /* the file is the buffer (sample.c) */
     if (I->buf.mode == BUF_MODE_SCAN) scan_block(I, frames);
     else live_block(I, frames);
 }

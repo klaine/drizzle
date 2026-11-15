@@ -7,7 +7,9 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "drizzle.h"
 #include "plugin_api.h"
+#include "sample.h"
 
 extern plugin_api_v2_t *move_plugin_init_v2(const host_api_v1_t *host);
 
@@ -84,6 +86,17 @@ EXPORT void wa_midi(int status, int d1, int d2) {
     uint8_t msg[3] = {(uint8_t)status, (uint8_t)d1, (uint8_t)d2};
     int len = (status & 0xF0) == 0xD0 || (status & 0xF0) == 0xC0 ? 2 : 3;
     g_api->on_midi(g_inst, msg, len, 0);
+}
+
+/* Sample mode (plan/04 section 5): the page decodes and resamples a file to 44.1 kHz mono, copies it
+ * into wa_smp_buf(), puts its name in wa_val() and calls wa_smp_commit(frames). */
+static float g_smp[DRZ_SMP_MAX];
+EXPORT float *wa_smp_buf(void) { return g_smp; }
+EXPORT int wa_smp_cap(void) { return DRZ_SMP_MAX; }
+EXPORT void wa_smp_commit(int frames) {
+    g_val[VAL_CAP - 1] = 0;
+    drz_inst_t *I = drz_inst(g_inst);
+    if (I) smp_set_direct(I, g_smp, frames < 0 ? 0 : frames, g_val);
 }
 
 /* Render up to 128 stereo frames into wa_pcm() (interleaved int16). */

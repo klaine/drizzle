@@ -7,6 +7,7 @@
 
 #include "drizzle.h"
 #include "dsp_util.h"
+#include "sample.h"
 
 float map_size_s(float x) { return 0.005f * powf(400.0f, clampf(x, 0.0f, 1.0f)); }
 float map_dens_hz(float x) { return 0.5f * powf(500.0f, clampf(x, 0.0f, 1.0f)); }
@@ -136,6 +137,7 @@ static void preset_load(drz_inst_t *I, int idx) {
     I->preset_idx = idx;
     I->browse_last = idx;
     patch_loaded(I);
+    smp_request(I, ""); /* factory patches carry no sample */
 }
 
 /* Move's Factory Patches page steps through one category (pb_cat), as Crest's does. */
@@ -199,6 +201,21 @@ static int state_save(const drz_inst_t *I, char *buf, int cap) {
         w_str(&w, val);
         w_str(&w, "\"");
     }
+    char path[DRZ_SMP_PATH];
+    if (smp_path(I, path, sizeof path) > 0) { /* the sample's path, never its audio (plan/12 section 2) */
+        w_str(&w, ",\"smp_file\":\"");
+        for (const char *p = path; *p; p++) {
+            char c[3] = {0, 0, 0};
+            if (*p == '"' || *p == '\\') {
+                c[0] = '\\';
+                c[1] = *p;
+            } else if ((unsigned char)*p >= 32) {
+                c[0] = *p;
+            }
+            w_str(&w, c);
+        }
+        w_str(&w, "\"");
+    }
     w_str(&w, "}");
     return w.ok ? w.n : -1;
 }
@@ -242,7 +259,17 @@ static void state_load(drz_inst_t *I, const char *blob) {
         if (DRZ_PARAMS[i].flags & PF_STATE) I->v[i] = DRZ_PARAMS[i].def;
     snprintf(I->name, sizeof I->name, "Init");
     p = blob;
+    char path[DRZ_SMP_PATH] = "";
     while (next_pair(&p, end, &k, &kl, &v, &vl)) {
+        if (kl == 8 && strncmp(k, "smp_file", 8) == 0) {
+            int o = 0;
+            for (int i = 0; i < vl && o < (int)sizeof path - 1; i++) {
+                if (v[i] == '\\' && i + 1 < vl) i++;
+                path[o++] = v[i];
+            }
+            path[o] = 0;
+            continue;
+        }
         if (kl == 4 && strncmp(k, "name", 4) == 0) {
             int o = 0;
             for (int i = 0; i < vl && o < (int)sizeof I->name - 1; i++) {
@@ -262,6 +289,7 @@ static void state_load(drz_inst_t *I, const char *blob) {
     }
     I->preset_idx = -1;
     patch_loaded(I);
+    smp_request(I, path); /* the worker loads it again (or clears it) */
 }
 
 /* ------------------------------------------------------------------ display (plan/11 section 4) */
@@ -273,16 +301,17 @@ static int buf_view(const drz_inst_t *I, char *buf, int cap) {
     if (cap < 6 + 2 * DRZ_BINS + 1) return -1;
     const buffer_t *b = &I->buf;
     int scan = b->mode == BUF_MODE_SCAN;
-    int prog = scan && b->rendering && b->render_len > 0 ? (int)(255LL * b->render_k / b->render_len) : 255;
-    if (prog > 254 && scan && b->rendering) prog = 254;
+    int smp = I->sp.type == SRC_TYPE_SAMPLE;
+    int prog = !smp && scan && b->rendering && b->render_len > 0 ? (int)(255LL * b->render_k / b->render_len) : 255;
+    if (prog > 254 && !smp && scan && b->rendering) prog = 254;
     int head = 255; /* Live: the newest sample is at the right edge */
-    buf[0] = scan ? 'S' : 'L';
+    buf[0] = smp ? 'M' : scan ? 'S' : 'L';
     buf[1] = b->frozen ? '1' : '0';
     buf[2] = HEX[prog >> 4];
     buf[3] = HEX[prog & 15];
     buf[4] = HEX[head >> 4];
     buf[5] = HEX[head & 15];
-    const uint8_t *bins = b->bins[scan && b->front >= 0 ? b->front : 0];
+    const uint8_t *bins = smp ? I->smp_bins : b->bins[scan && b->front >= 0 ? b->front : 0];
     for (int i = 0; i < DRZ_BINS; i++) {
         buf[6 + 2 * i] = HEX[bins[i] >> 4];
         buf[7 + 2 * i] = HEX[bins[i] & 15];
@@ -316,6 +345,10 @@ void params_set(drz_inst_t *I, const char *key, const char *val) {
         snprintf(I->name, sizeof I->name, "%s", val);
         return;
     }
+    if (strcmp(key, "smp_file") == 0) { /* the Sample source's file: the loader thread reads it */
+        smp_request(I, val);
+        return;
+    }
     int id = params_find(key);
     float f;
     if (id < 0 || !parse_value(id, val, (int)strlen(val), &f)) return;
@@ -343,7 +376,8 @@ int params_get(drz_inst_t *I, const char *key, char *buf, int buf_len) {
     if (strcmp(key, "buf_view") == 0) return buf_view(I, buf, buf_len);
     if (strcmp(key, "mm_items") == 0) return mm_items(I, buf, buf_len);
     if (strcmp(key, "grain_view") == 0) return grains_view(I, buf, buf_len);
-    if (strcmp(key, "smp_status") == 0) return copy_out("none", 4, buf, buf_len);
+    if (strcmp(key, "smp_status") == 0) return smp_status(I, buf, buf_len);
+    if (strcmp(key, "smp_file") == 0) return smp_path(I, buf, buf_len);
     if (strcmp(key, "split_voices") == 0) return copy_out("", 0, buf, buf_len);
 #ifdef DRZ_PROFILE
     if (strcmp(key, "cpu_us") == 0) {

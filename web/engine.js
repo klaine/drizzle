@@ -57,4 +57,18 @@ export class Engine {
   midi(m) { this.node.port.postMessage({ t: "midi", m }); }
 
   tempo(bpm, run) { this.node.port.postMessage({ t: "tempo", bpm, run }); }
+
+  /** Sample mode: 44.1 kHz mono samples (Float32Array) and the name the patch remembers. */
+  loadSample(data, name) { this.node.port.postMessage({ t: "sample", data, name }, [data.buffer]); }
+
+  /** Decode a file (any format the browser reads) to 44.1 kHz mono. */
+  async decode(bytes) {
+    const buf = await this.ctx.decodeAudioData(bytes);
+    const off = new OfflineAudioContext(1, Math.ceil(buf.duration * 44100), 44100);
+    const src = off.createBufferSource();
+    src.buffer = buf;
+    src.connect(off.destination);
+    src.start();
+    return (await off.startRendering()).getChannelData(0);
+  }
 }

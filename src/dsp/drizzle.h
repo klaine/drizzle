@@ -181,6 +181,10 @@ typedef struct drz_inst {
     uint8_t step_off[DRZ_SUB];
     int64_t step_idx[DRZ_SUB];
     int bar_start;                          /* a bar starts in this sub-block (Random = Bar) */
+    /* the Sample source (sample.c) */
+    int smp_ready;                          /* smp[] holds a sample the grains may read */
+    int32_t smp_frames;
+    uint8_t smp_bins[DRZ_BINS];
     int64_t step_cur;                       /* the grid step the sub-block starts in */
     float step_frac;                        /* how far into it, 0..1 */
     float vol_cur;

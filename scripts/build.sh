@@ -71,11 +71,11 @@ if [ "$TEST" = 1 ]; then
   SAN="-fsanitize=undefined -fno-sanitize-recover=undefined"
   # -DDRZ_TEST tags every ring sample so the read guard is checked on every sample a grain reads.
   "$ZIG" cc -std=c11 -O1 -g $SAN $WARN $MATH -DDRZ_TEST -I src/dsp \
-    -o "$BUILD/drizzle_test" $DSP_SRC tests/host/test_main.c -lm
+    -o "$BUILD/drizzle_test" $DSP_SRC tests/host/test_main.c -lm -lpthread
   "$BUILD/drizzle_test"
   # once more with every grain on the wrapping (slow) read path, so both paths stay tested
   "$ZIG" cc -std=c11 -O1 -g $SAN $WARN $MATH -DDRZ_TEST -DDRZ_TEST_SLOW -I src/dsp \
-    -o "$BUILD/drizzle_test_slow" $DSP_SRC tests/host/test_main.c -lm
+    -o "$BUILD/drizzle_test_slow" $DSP_SRC tests/host/test_main.c -lm -lpthread
   if ! "$BUILD/drizzle_test_slow" >"$BUILD/test_slow.log"; then
     cat "$BUILD/test_slow.log"
     exit 1
@@ -91,20 +91,20 @@ if [ "$TEST" = 1 ]; then
   fi
 
   echo "== golden"
-  "$ZIG" cc -std=c11 -O2 $WARN $MATH -I src/dsp -o "$BUILD/drizzle_golden" $DSP_SRC tests/golden/golden_main.c -lm
+  "$ZIG" cc -std=c11 -O2 $WARN $MATH -I src/dsp -o "$BUILD/drizzle_golden" $DSP_SRC tests/golden/golden_main.c -lm -lpthread
   "$PY" tests/golden/check_golden.py "$BUILD/drizzle_golden"
 fi
 
 if [ "$BENCH" = 1 ]; then
   echo "== bench"
-  "$ZIG" cc -std=c11 -O2 $WARN $MATH -I src/dsp -o "$BUILD/drizzle_bench" $DSP_SRC tests/host/bench_main.c -lm
+  "$ZIG" cc -std=c11 -O2 $WARN $MATH -I src/dsp -o "$BUILD/drizzle_bench" $DSP_SRC tests/host/bench_main.c -lm -lpthread
   "$BUILD/drizzle_bench"
 fi
 
 if [ "$RENDER" = 1 ]; then
   echo "== demo renders"
   mkdir -p "$BUILD/demo"
-  "$ZIG" cc -std=c11 -O2 $WARN $MATH -I src/dsp -o "$BUILD/drizzle_render" $DSP_SRC tests/host/render_wav.c -lm
+  "$ZIG" cc -std=c11 -O2 $WARN $MATH -I src/dsp -o "$BUILD/drizzle_render" $DSP_SRC tests/host/render_wav.c -lm -lpthread
   "$BUILD/drizzle_render" "$BUILD/demo"
 fi
 
@@ -112,7 +112,7 @@ echo "== dsp.so (aarch64-linux-gnu)"
 # -ffile-prefix-map: no absolute build paths (and so no user name) in shipped binaries.
 "$ZIG" cc -target aarch64-linux-gnu.2.28 -mcpu=cortex_a72 -std=c11 -O2 $WARN $MATH $DEFS \
   -fPIC -shared -fvisibility=hidden -s -ffile-prefix-map="$ROOT"=. -I src/dsp \
-  -o "$MODULE/dsp.so" $DSP_SRC -lm -ldl -lrt  # dl, rt: move_info.h (glibc 2.28 keeps them apart)
+  -o "$MODULE/dsp.so" $DSP_SRC -lm -lpthread -ldl -lrt  # pthread: the sample loader; dl, rt: move_info.h
 rm -f "$MODULE/dsp.so.o"
 
 echo "== check dsp.so"

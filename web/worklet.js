@@ -73,6 +73,13 @@ class DrizzleProcessor extends AudioWorkletProcessor {
         break;
       }
       case "midi": x.wa_midi(d.m[0], d.m[1] | 0, d.m[2] | 0); break;
+      case "sample": { /* {t:"sample", data: Float32Array at 44.1 kHz, name} */
+        const n = Math.min(d.data.length, x.wa_smp_cap());
+        new Float32Array(x.memory.buffer, x.wa_smp_buf(), n).set(d.data.subarray(0, n));
+        utf8Write(this.mem(), x.wa_val(), x.wa_val_cap(), d.name || "");
+        x.wa_smp_commit(n);
+        break;
+      }
       case "tempo": x.wa_set_tempo(d.bpm, d.run ? 1 : 0); break;
     }
   }
