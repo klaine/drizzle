@@ -2,7 +2,7 @@
   "id": "drizzle",
   "name": "Drizzle",
   "abbrev": "DRZL",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "api_version": 2,
   "description": "Granular synth: a wavetable or analog source re-read as grain clouds",
   "author": "AI & Klaine",

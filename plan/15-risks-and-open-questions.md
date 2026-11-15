@@ -35,3 +35,7 @@
 | 2026-11-15 | Factory bank mostly ambient and texture, with a Rhythm & Glitch category (12 of 64). |
 | 2026-11-15 | Crest's toolchain, codegen, filter, FX and UI; Amino's wavetables, Flavour, pressure page, "via" matrix and golden tests over every patch. |
 | 2026-11-15 | Fixed FX order Crush → Chorus → Delay → Reverb; no `visible_if`; Filter Off by default. |
+| 2026-11-15 | M0 to M6 built without a device: the Move checks (plan/16) gate v1.0.0; the first release is 0.1.0. |
+| 2026-11-15 | patch_vol's gain is 4·x² (0.5 = unity): sparse and percussive patches need up to +12 dB to match the bank. |
+| 2026-11-15 | The bank is levelled to INIT by the four loudest 250 ms slices, under a −4 dBFS peak ceiling. |
+| 2026-11-15 | Grain random draws come from per-voice streams, so Random Note and Bar repeat exactly. |

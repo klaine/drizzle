@@ -14,11 +14,13 @@ scripts/build.sh --profile    # dsp.so with the read-only cpu_us key (render tim
 scripts/build_web.sh          # drizzle.wasm, build/site (python3 -m http.server -d build/site 8765), build/drizzle.html
 scripts/pages.sh [--push]     # build/drizzle.html as index.html on the `pages` branch (build.sh runs it, without --push)
 scripts/deploy.sh [host]      # staged install on a Move; scripts/logs.sh follows the debug log
+tools/level/level.py build/drizzle_golden [--write]   # level the factory bank (then --gen)
+tests/golden/check_golden.py build/drizzle_golden --write   # only for an intended sound change
 ```
 zig comes from `PATH`, `$ZIG` or `pip install ziglang`.
 
 ## Status
-M1 done. Milestones are in `plan/14-roadmap.md`; `plan/16-implementation-status.md` records what's
+M0–M6 built (0.1.0), not yet run on a Move. Milestones are in `plan/14-roadmap.md`; `plan/16-implementation-status.md` records what's
 built, measured, inert and different from the spec: update it when that changes.
 
 ## Where things come from
@@ -27,8 +29,11 @@ built, measured, inert and different from the spec: update it when that changes.
   milestone and appear in `ui_hierarchy` once `MILESTONE` reaches it.
 - **Factory patches:** `presets/factory/*.json`, only the values that differ from INIT. The browser
   build's "Patch JSON" button writes one.
-- **Browser:** `web/` (the page, worklet and wasm host) is Drizzle's own; the Remote UI on the Move
-  (`src/web/`, with the shared preset browser) comes with M4.
+- **UI:** `src/canvas.js` (home page, browser page) and `src/cards.js` on the Move, with GENERATED
+  META blocks; `src/web_ui.html` + `src/web/` is the Remote UI and, with `web/` (wasm host,
+  worklet, engine, embed.js), the browser synth. `presetbrowser.js`, `presetdrawer.js` and
+  `presetbrowser.css` are byte-identical copies of Amino's.
+- **Samples:** `src/dsp/sample.c` owns the loader thread, the only code that touches files.
 
 ## Spec rules
 - `plan/` is the spec; once code exists, the code is the source of truth. If they disagree, fix one

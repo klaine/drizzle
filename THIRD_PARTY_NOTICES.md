@@ -41,5 +41,13 @@ effects chain (`src/dsp/fx.c`), DSP helpers, contract validator and browser
 host (`web/wasm_host.c`, `web/worklet.js`, `web/engine.js`) are adapted from
 [Crest](https://github.com/klaine/crest) and
 [Amino](https://github.com/klaine/amino), released under the same MIT licence
-as Drizzle. From M2, Drizzle also uses Amino's wavetables; their AKWF-FREE
-(CC0) sources will be credited here when they arrive.
+as Drizzle. Drizzle's wavetables are Amino's (`tools/wavegen/`, see its README).
+
+## AKWF-FREE single-cycle waveforms (CC0)
+
+Wavetables 32–47 and 68–73 (Amino's numbering, kept here) are built from waveforms in
+[AKWF-FREE](https://github.com/KristofferKarlAxelEkstrand/AKWF-FREE) by Kristoffer
+Ekstrand, released under CC0 1.0 (public domain dedication). No attribution is
+required; it is given here with thanks. Each table's source and licence are listed
+in `tools/wavegen/manifest.json`; the other tables are generated procedurally by
+Amino's `tools/wavegen/`.

@@ -3,70 +3,68 @@
 State of the code against this plan. Update it when the code changes; the code is the source of
 truth.
 
-## Done: M1 (November 2026), not yet run on a Move
-M0 and M1 of [14](14-roadmap.md). Nothing has run on a Move yet, so M0's device questions
-([15 §2](15-risks-and-open-questions.md) 1–4) are still open.
+## Built: M0–M6 (November 2026), version 0.1.0, not yet run on a Move
+
+Everything in [14](14-roadmap.md) that does not need a Move or the owner is done. Nothing has run on
+a Move yet, so the device questions of [15 §2](15-risks-and-open-questions.md) are still open and
+gate v1.0.0.
 
 | Area | Status |
 |---|---|
-| Codegen: `tools/gen/params.py` (210 keys, every key of [10](10-parameter-reference.md)) → `params_gen.*`, `contract_gen.c`, `windows_gen.c`, `factory_presets.c`, `build/ui/*.json`; `gen.py --check` in the build | Done |
-| Instance pool (4; 1 in the browser), MIDI (notes, sustain, bend, CC 69 freeze, 120/121/123), FTZ, soft clip, NaN guard, `cpu_us` | Done |
-| Analog source: Sine / Tri / Saw / Pulse with Shape (Crest's polyBLEP waves), osc B, density (3 detuned copies), B→A phase modulation, sync with a polyBLEP-corrected reset, noise; fold; 12 dB tone filter | Done |
-| Sweep: Timbre, Fold, Pitch and Tone depths with curve; across the tape in Scan, over `sw_time` (One / Loop / Bounce) in Live | Done |
-| Buffer: Live ring with the read guard, Freeze with the seam crossfade and freeze-after-load; Scan tapes rendered at 8× realtime into a back buffer, 60 ms debounce, swapped only when no grain reads the buffer being written, held by Freeze; mode switching; display bins | Done |
-| Grains: 128-grain pool, 64 per voice, Cloud scheduler, Position / Spray / Scan Speed, Hermite reads in 32.32 fixed point with a wrap-free fast path, six generated windows with RMS normalisers, pitch, fine, pitch spray quantised Off / Oct / Fifth, reverse, spread, level spray, overlap gain, release thinning | Done |
-| Voices: Poly with a voice limit, octave, bend; Amp ADSR from Crest's env.c with velocity | Done |
-| Effects: Crest's chain (Crush with Soft / Hard / Fold / Bits, Chorus, Delay, Reverb) in fixed order | Done |
-| State blob (≈ 3.7 KB), factory bank (Init + 6 starter patches), factory browser keys (`preset`, `pb_*`), `buf_view`, `grain_view` | Done |
-| Move pages: Main + 14 pages of M1 features + Factory Patches / Patch Category (host knob grid) | Done |
-| Browser: `scripts/build_web.sh` → `build/site` and the single file `build/drizzle.html` (250 KB): all pages from `ui_meta.json`, live buffer and grain view, keyboard, Web MIDI, patch-JSON export | Done, checked in headless Chromium |
-| Tests: 124 native checks under UBSan (twice: fast and slow read paths), contract validator, wasm test in Node | Done |
+| Codegen: `tools/gen/params.py` (217 keys) → C tables, contract, windows, wavetables, factory bank, web UI data, on-device META; `gen.py --check` in the build | Done |
+| Sources: Wavetable (Amino's 74 tables, Vintage / Clean, ring / PM / sync), Analog (Crest's polyBLEP waves, density, FM, sync, noise), Sample (WAV via the loader thread); fold, tone; Sweep and Source LFO | Done |
+| Buffer: Live ring with read guard and note tracking, Freeze with seam crossfade, Scan tapes at 8× realtime with debounce and click-free swap, Sample regions | Done |
+| Grains: 128-grain pool, Cloud and Tempo scheduling, position / spray / scan, six windows, pitch, pitch spray (Off / Oct / Fifth / Scale), reverse, spread, level spray, period lock, probability, repeats, Random Free / Note / Bar, release thinning | Done |
+| Voices: Poly / Mono / Legato, glide, Flavour, voice limit, bend, octave; per-voice stereo SVF; Amp and Mod envelopes | Done |
+| Modulation: LFO 1 / 2 with direct depths, pressure, 12-slot matrix with list editor and proxies, 4 macros, `:effective` | Done |
+| Effects: Crest's chain (Crush incl. Bits, Chorus, Delay, Reverb incl. Cloud), Reverb Freeze | Done |
+| Move UI: 29 levels from `params.py`, home page and browser canvas, 34 cards, help | Done; drawn on a mock display only |
+| Remote UI and browser synth (`src/web/`, `web/`), shared preset browser, single file `build/drizzle.html` (0.72 MB) | Done; checked in headless Chromium, standalone and with a mocked `schwungRemote` |
+| Factory bank: 65 patches in 7 categories, macros and wheel on every patch, levelled (`tools/level`) | Done; no Sample patches (no audio of our own yet) |
+| Tests: 189 native checks under UBSan on both read paths, contract, 314 device-UI checks, golden audio over 69 cases, wasm test; CI workflow | Done |
 
-Build output: `dsp.so` 148 KB stripped, package 56 KB. `chain_params` 18.6 KB, `ui_hierarchy` 3.4 KB.
+Build output: `dsp.so` 0.86 MB stripped (most of it the wavetables), package 0.55 MB. `chain_params` 22.1 KB,
+`ui_hierarchy` 6.3 KB, state blob about 3.8 KB.
 
 ### Measured on the build machine (a cloud x86 VM, not a Move)
-`scripts/build.sh --bench`, 3 000 blocks of 128 frames, INIT's reverb on:
+`scripts/build.sh --bench`, 128-frame blocks:
 
-| Case | mean | p99 |
-|---|---|---|
-| idle (reverb running) | 15 µs | 29 µs |
-| INIT, 8 notes | 21 µs | 40 µs |
-| 8 notes, dense (128 grains) | 74 µs | 112 µs |
-| 8 notes, pool full, pitched up | 81 µs | 135 µs |
+| Case | p99 |
+|---|---|
+| INIT, 8 notes | ≈ 35 µs |
+| 8 notes, pool full (128 grains) | ≈ 130–160 µs |
+| worst: pool full, LP24 on every voice, all effects, period lock | ≈ 140 µs |
+| worst + a Scan tape re-rendering all the time | ≈ 220 µs |
 
-## Inert until their milestone
-Stored in patches and shown where their page exists, but without effect yet:
-- **M2:** the Wavetable source (`wt_*`; `src_type` Wavetable and Sample render the Analog source),
-  `src_track`, Source LFO (`sl_*`), `gr_lock`, the filter (`flt_*`), the Mod envelope and its
-  depths (`me_*`), `v_mode` Mono / Legato, `v_glide`, `v_flav`, pitch quantise Scale (rounds to
-  semitones until the Move set's scale is read).
-- **M3:** Tempo mode and the Rhythm keys (`gr_mode`, `gr_div`, `gr_swing`, `gr_prob`, `gr_rpt`,
-  `gr_rnd`, `gr_seed`), LFO 1 / 2, pressure, the matrix and macros, reverb Cloud (plays Hall) and
-  `rev_frz`; `:effective` answers the base value.
-- **M5:** the Sample keys (`smp_*`).
+Crest's estimate puts the Move's Cortex-A72 at 4–6× slower: the worst case may land near the
+900 µs budget of [03 §7](03-dsp-architecture.md). The levers are listed there.
 
 ## Deviations from the spec
-- **INIT's source is Analog** until the Wavetable source exists (M2); then INIT moves to Wavetable as
-  [12 §5](12-presets-and-state.md) says.
-- **Window edges** are fractions of the grain (3 %), not milliseconds ([06 §5](06-grain-engine.md), updated).
 - **Live ring** wraps at 8 s whatever `buf_len` is; **freeze after a load** waits for the ring to
-  refill ([05](05-source-buffer.md), updated in M0).
-- **Smoothing:** only the master volume is ramped. Grain parameters are latched per grain, so they
-  need none; source and effect knobs may zipper and are a listening item.
-- **Browser UI:** a standalone page generated from `ui_meta.json`, not yet the Remote UI on the Move
-  with the shared preset browser (M4).
-- **Starter patches** are not levelled (about 15 dB apart); levelling comes with the M4 bank.
+  refill ([05](05-source-buffer.md), updated).
+- **Window edges** are fractions of the grain (3 %), not milliseconds ([06 §5](06-grain-engine.md), updated).
+- **patch_vol** is gain 4·x² (0.5 = unity) instead of 2·x², for headroom to level the bank.
+- **Levelling** uses the four loudest 250 ms slices under a −4 dBFS peak ceiling instead of LUFS;
+  seven percussive or sparse patches are held at the ceiling, 1.5–8 dB under the rest.
+- **Smoothing:** only the master volume is ramped. Grain parameters are latched per grain; source
+  and effect knobs may zipper and are a listening item.
+- **Unfreeze** can click where recording resumes (a listening item).
+- **Bank size:** 65 with Init (15 pads, one more than planned).
+- **Tempo mode** joins the grid on the step a note falls in if it came within the first quarter of
+  it; a transport jump back re-syncs every voice.
 
-## To verify on a Move
-1. `scripts/build.sh`, `scripts/deploy.sh`: Drizzle appears as DRZL; the log is clean; the ~26 MB
-   `.bss` loads (Q1).
-2. The pages walk as in [11 §2](11-ui-pages.md); the factory browser loads the 7 patches.
-3. A Scan patch: the tape is audible within about 0.5 s of loading; turning an Analog knob re-renders
-   without a click.
-4. CC 69 freezes a Live patch (Q3); save to My Presets and reload the Set (Q2: 3.7 KB blob).
-5. `scripts/build.sh --profile`, 8 held notes on a dense patch: read `cpu_us` (Q4). M1's target is
-   ≤ 500 µs with 8 voices and 64 grains.
+## To verify on a Move (gates v1.0.0)
+1. `scripts/deploy.sh`: Drizzle appears as DRZL, the log is clean, the ~26 MB `.bss` loads (Q1).
+2. Walk every page; the home page draws the buffer and grains (Q5: poll rate); cards appear.
+3. A Scan patch: the tape is audible within about 0.5 s; turning a source knob re-renders without a click.
+4. CC 69 freezes (Q3); poly pressure moves the cloud; a Tempo patch follows Move's transport (Q7).
+5. Save to My Presets and reload the Set (Q2: a 3.8 KB blob); a Sample patch reloads its file (Q6).
+6. `scripts/build.sh --profile`, the worst-case patch, 8 notes: read `cpu_us` (Q4); then 4 tracks of
+   Drizzle with Move's own instruments, listening for xruns.
+7. Listen: the checklist of [13 §8](13-testing.md), aliasing of grains far above the root (R3), and
+   a run through all 65 patches with their macros.
 
-## Next
-M2 ([14](14-roadmap.md)): the Wavetable source from Amino's tables, period lock, `src_track`,
-Source LFO, the per-voice filter, the Mod envelope, Mono / Legato / glide / Flavour, golden tests.
+## Owner's decisions still open
+- Publishing the browser synth (`scripts/pages.sh --push`) and tagging v0.1.0 (CI then attaches the
+  package and `drizzle.html` to the release).
+- A Schwung catalog entry.
